@@ -16,6 +16,11 @@ pnpm --dir frontend build          # writes .output/public
 pnpm --dir frontend test:e2e       # Playwright, 390 px, behind a prefix
 ```
 
+`scripts/ui-prefix.sh --ui-dir "$PWD/frontend/.output/public"` checks the
+built shell behind a real nginx path prefix. The directory must be absolute:
+the gate starts the binary in a temporary working directory, so a relative
+path points at nothing and every asset 404s.
+
 `pnpm --dir frontend build` runs `nuxt generate` and then
 `scripts/postbuild.mjs`. The script rewrites the generated HTML to relative
 asset paths (`./_nuxt/...`) and the runtime `baseURL` to `./`, because Nuxt
