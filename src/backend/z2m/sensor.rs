@@ -144,6 +144,26 @@ pub fn battery_percent(level: f64) -> u8 {
     level.clamp(0.0, 100.0).round() as u8
 }
 
+/// The v1 `buttonevent` code for a z2m action.
+///
+/// v1 encodes a press as `<button><event>`: 1000 initial press, 1001 hold,
+/// 1002 short release, 1003 long release. z2m names the gesture instead of
+/// numbering it, so the name is what maps; a name with no Hue equivalent
+/// becomes a short release, which is what most remotes send.
+#[must_use]
+pub fn buttonevent(action: &str) -> u32 {
+    let action = action.to_ascii_lowercase();
+    if action.contains("release") {
+        1003
+    } else if action.contains("hold") || action.contains("long") {
+        1001
+    } else if action.contains("press") {
+        1000
+    } else {
+        1002
+    }
+}
+
 /// The `power_state` a `DevicePower` resource carries.
 #[must_use]
 pub fn power_state(battery: Option<u8>) -> Value {
@@ -256,6 +276,15 @@ mod tests {
         }
         assert_eq!(light_level(0.0), 0);
         assert_eq!(light_level(0.5), 0);
+    }
+
+    #[test]
+    fn a_gesture_maps_to_the_v1_buttonevent_code() {
+        assert_eq!(buttonevent("single"), 1002);
+        assert_eq!(buttonevent("initial_press"), 1000);
+        assert_eq!(buttonevent("hold"), 1001);
+        assert_eq!(buttonevent("long_release"), 1003);
+        assert_eq!(buttonevent("something_new"), 1002);
     }
 
     #[test]

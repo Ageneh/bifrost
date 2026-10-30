@@ -285,10 +285,19 @@ impl Z2mBackend {
         let device = self.network.get(topic);
         let mut res = self.state.lock().await;
 
+        // every reading carries when it changed: v1 writes that timestamp
+        // into `state.lastupdated`, and a client that shows "3 min ago"
+        // needs the same one
+        let changed = Utc::now();
+
         if let Some(raw) = upd.occupancy {
             let motion = device.map_or(raw, |device| sensor::is_active(device, "occupancy", raw));
             res.update::<Motion>(rid, |known| {
-                known.motion = json!({ "motion": motion, "motion_valid": true });
+                known.motion = json!({
+                    "motion": motion,
+                    "motion_valid": true,
+                    "motion_report": { "changed": changed, "motion": motion },
+                });
             })?;
         }
 
@@ -297,15 +306,18 @@ impl Z2mBackend {
                 known.temperature = json!({
                     "temperature": temperature,
                     "temperature_valid": true,
+                    "temperature_report": { "changed": changed, "temperature": temperature },
                 });
             })?;
         }
 
         if let Some(lux) = upd.illuminance {
+            let level = sensor::light_level(lux);
             res.update::<LightLevel>(rid, |known| {
                 known.light = json!({
-                    "light_level": sensor::light_level(lux),
+                    "light_level": level,
                     "light_level_valid": true,
+                    "light_level_report": { "changed": changed, "light_level": level },
                 });
             })?;
         }
@@ -314,7 +326,11 @@ impl Z2mBackend {
             let open = device.map_or(raw, |device| sensor::is_active(device, "contact", raw));
             let state = if open { "contact" } else { "no_contact" };
             res.update::<Contact>(rid, |known| {
-                known.0["contact"] = json!({ "state": state, "state_valid": true });
+                known.0["contact"] = json!({
+                    "state": state,
+                    "state_valid": true,
+                    "contact_report": { "changed": changed, "state": state },
+                });
             })?;
         }
 
@@ -531,7 +547,7 @@ impl Z2mBackend {
                 // this wave. Importing every sensor on upgrade would add a
                 // duplicate Hue resource for each one, so a sensor reaches
                 // the Hue API only when the configuration names it enabled.
-                if enabled != Some(true) {
+                if !enabled.unwrap_or_default() {
                     log::info!(
                         "[{}] Leaving {ieee} ({}) out: sensors are opt-in \
                          (set devices.{ieee}.enabled to import it)",
