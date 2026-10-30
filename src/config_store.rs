@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::config::validate::{self, ValidationError};
 use crate::config::{self, AppConfig};
 
 /// Permissions for every file the store creates. Configuration may hold
@@ -35,6 +36,9 @@ pub enum ConfigStoreError {
 
     #[error("No draft configuration exists")]
     NoDraft,
+
+    #[error("Configuration has {} validation error(s)", .0.len())]
+    Invalid(Vec<ValidationError>),
 
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -235,8 +239,10 @@ impl ConfigStore {
 
     /// Promote the draft to the active configuration.
     ///
-    /// Writes `<config>.bak` from the file currently on disk, then the new
-    /// configuration, then swaps the in-memory copy and clears the draft.
+    /// Refuses a draft with hard validation errors the active configuration
+    /// does not already have. Writes `<config>.bak` from the file currently
+    /// on disk, then the new configuration, then swaps the in-memory copy
+    /// and clears the draft.
     // the revision is bumped while the draft lock is held, so a concurrent
     // writer cannot pass the revision check in between
     #[allow(clippy::significant_drop_tightening)]
@@ -248,6 +254,11 @@ impl ConfigStore {
             .as_ref()
             .map(|draft| draft.config.clone())
             .ok_or(ConfigStoreError::NoDraft)?;
+
+        let errors = validate::new_errors(&read(&self.active), &applied);
+        if !errors.is_empty() {
+            return Err(ConfigStoreError::Invalid(errors));
+        }
 
         let yaml = serde_yml::to_string(&applied)?;
         self.backup()?;
@@ -462,6 +473,25 @@ mod tests {
 
         let reloaded = ConfigStore::load(&store.paths().config).unwrap();
         assert_eq!(reloaded.active().bridge.name, "Applied");
+    }
+
+    #[test]
+    fn apply_refuses_new_validation_errors() {
+        let dir = TempDir::new();
+        let store = store_in(&dir);
+        let mut config = store.active();
+        config.bridge.https_port = config.bridge.http_port;
+        store.set_draft(0, config).unwrap();
+
+        let err = store.apply(1).unwrap_err();
+
+        let ConfigStoreError::Invalid(errors) = err else {
+            panic!("expected validation failure, got {err:?}");
+        };
+        assert_eq!(errors[0].path, "bridge.https_port");
+        assert!(store.draft().is_some());
+        assert_eq!(store.revision(), 1);
+        assert!(!store.paths().backup.exists());
     }
 
     #[test]

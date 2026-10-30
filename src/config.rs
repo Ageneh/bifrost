@@ -1,3 +1,5 @@
+pub mod validate;
+
 use camino::Utf8Path;
 use config::{Config, ConfigError};
 
