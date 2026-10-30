@@ -345,6 +345,23 @@ async fn unknown_bifrost_paths_are_guarded_and_never_html() {
     }
 }
 
+/// Past the guard, a `/bifrost` path no route mounts is a 404: the SPA
+/// shell answers unknown pages, never an admin path that does not exist.
+#[tokio::test]
+async fn unknown_bifrost_paths_are_404_with_a_session() {
+    let fixture = Fixture::new().await;
+    let session = fixture.login();
+    let cookie = format!("bifrost_session={}", session.token);
+
+    for uri in ["/bifrost/nope", "/bifrost/config/nope", "/bifrost"] {
+        let (status, body) = fixture
+            .send(Method::GET, uri, OWNER, &[("cookie", &cookie)], None)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}: {body}");
+        assert!(!body.contains('<'), "{uri}: {body}");
+    }
+}
+
 async fn preflight_allows(fixture: &Fixture, uri: &str) -> bool {
     let mut request = Request::builder()
         .method(Method::OPTIONS)

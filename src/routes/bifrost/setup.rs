@@ -897,6 +897,21 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
+    /// The second listener — the one that lets the Supervisor gateway reach
+    /// the panel before a configuration exists — binds the interface of the
+    /// default route, never the wildcard: a setup page reachable on every
+    /// interface is the failure this guards.
+    #[test]
+    fn the_setup_listener_is_not_a_wildcard() {
+        let address = super::default_listen().unwrap();
+
+        assert!(
+            !address.ip().is_unspecified(),
+            "setup mode would listen on every interface: {address}"
+        );
+        assert_ne!(address.port(), 0, "setup mode picked no port");
+    }
+
     #[tokio::test]
     async fn setup_refuses_dns_names() {
         let fixture = Fixture::new();
