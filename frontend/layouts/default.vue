@@ -5,8 +5,10 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useApi } from '~/composables/useApi'
+import { useStatusPanel } from '~/composables/useStatusPanel'
 
 const { client, ready, authenticated, setupRequired } = useApi()
+const { component: statusComponent, panelProps: statusProps } = useStatusPanel()
 
 /**
  * The name the running bridge reports. It is read from the active
@@ -60,6 +62,11 @@ watch(
     >
       <slot />
       <template #status>
+        <component
+          :is="statusComponent"
+          v-if="statusComponent"
+          v-bind="statusProps"
+        />
         <div class="draft-slot">
           <DraftBar />
         </div>

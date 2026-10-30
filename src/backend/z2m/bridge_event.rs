@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio_tungstenite::tungstenite;
@@ -5,14 +6,181 @@ use uuid::Uuid;
 
 use hue::api::{DimmingUpdate, GroupedLight, Light, LightUpdate, RType, Resource, Room};
 use z2m::api::{
-    BridgeDevices, DeviceRemoveResponse, GroupMemberChange, Message, RawMessage, Response,
+    BridgeDevices, BridgeEvent, DeviceRemoveResponse, Group, GroupMemberChange, Message,
+    RawMessage, Response,
 };
 use z2m::update::DeviceUpdate;
 
 use crate::backend::z2m::Z2mBackend;
 use crate::error::{ApiError, ApiResult};
+use crate::inventory::{Availability, GroupRef, PermitJoinState, RoomRef, from_z2m};
 
 impl Z2mBackend {
+    /// Publish one device into the inventory, keeping what only it knows.
+    fn publish_device(&self, dev: &z2m::api::Device) {
+        let Some(inventory) = self.inventory() else {
+            return;
+        };
+        let ieee = dev.ieee_address.to_string();
+        let previous = inventory.device(&self.name, &ieee);
+        let mut info = from_z2m(&self.name, dev, previous.as_ref());
+        info.group = self.group_of.get(&ieee).cloned();
+        inventory.upsert(info);
+    }
+
+    /// Recompute which room each of this server's devices is in.
+    ///
+    /// `Resources` is taken first and released before the inventory lock is
+    /// taken, which is the only order the two are ever locked in.
+    async fn sync_placement(&self) {
+        let Some(inventory) = self.inventory() else {
+            return;
+        };
+
+        let placements: Vec<(String, Option<RoomRef>)> = {
+            let lock = self.state.lock().await;
+            self.network
+                .values()
+                .map(|dev| {
+                    let link = RType::Device.deterministic(&dev.ieee_address);
+                    let room = lock
+                        .get_resource_ids_by_type(RType::Room)
+                        .into_iter()
+                        .find_map(|rid| {
+                            let room = lock.get_id::<Room>(rid).ok()?;
+                            room.children.contains(&link).then(|| RoomRef {
+                                rid: rid.to_string(),
+                                name: room.metadata.name.clone(),
+                            })
+                        });
+                    (dev.ieee_address.to_string(), room)
+                })
+                .collect()
+        };
+
+        for (ieee, room) in placements {
+            let group = self.group_of.get(&ieee).cloned();
+            inventory.set_placement(&self.name, &ieee, room, group);
+        }
+    }
+
+    /// The IEEE address of a device, by its friendly name.
+    fn device_ieee(&self, friendly_name: &str) -> Option<String> {
+        self.network
+            .get(friendly_name)
+            .map(|dev| dev.ieee_address.to_string())
+    }
+
+    /// Apply a `<name>/availability` report.
+    fn handle_availability(&self, friendly_name: &str, payload: &Value) {
+        let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(friendly_name))
+        else {
+            return;
+        };
+
+        let availability = match payload.get("state").and_then(Value::as_str) {
+            Some("online") => Availability::Online,
+            Some("offline") => Availability::Offline,
+            _ => return,
+        };
+
+        inventory.set_availability(&self.name, &ieee, availability, Some(Utc::now()));
+    }
+
+    /// Record that a device reported something on `topic`.
+    fn touch_device(&self, topic: &str) {
+        let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(topic)) else {
+            return;
+        };
+        inventory.touch(&self.name, &ieee, Utc::now());
+    }
+
+    /// Apply a `bridge/state` report: z2m itself came up or went down.
+    fn handle_bridge_state(&self, payload: &Value) {
+        let Some(inventory) = self.inventory() else {
+            return;
+        };
+
+        match payload.get("state").and_then(Value::as_str) {
+            Some("online") => inventory.server_up(&self.name),
+            Some("offline") => inventory.server_down(&self.name),
+            _ => {}
+        }
+    }
+
+    /// Apply a `bridge/permit_join` report.
+    fn handle_permit_join(&self, payload: &Value) {
+        let Some(inventory) = self.inventory() else {
+            return;
+        };
+
+        let time = payload
+            .get("time")
+            .and_then(Value::as_u64)
+            .and_then(|time| u32::try_from(time).ok())
+            .unwrap_or_default();
+        let device = payload
+            .get("device")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        inventory.set_permit_join(
+            &self.name,
+            PermitJoinState {
+                time,
+                device,
+                opened_at: (time > 0).then(Utc::now),
+            },
+        );
+    }
+
+    /// Apply a `bridge/event`: the announcements z2m makes as devices come
+    /// and go.
+    fn handle_bridge_event_record(&mut self, event: &BridgeEvent) {
+        if event.event_type != "device_removed" {
+            return;
+        }
+
+        let Some(data) = event.data.as_object() else {
+            return;
+        };
+
+        if let Some(name) = data.get("friendly_name").and_then(Value::as_str) {
+            self.forget_device(name);
+            return;
+        }
+
+        // a removal without a friendly name still names the address
+        let Some(ieee) = data.get("ieee_address").and_then(Value::as_str) else {
+            return;
+        };
+        let friendly_name = self
+            .network
+            .iter()
+            .find(|(_, dev)| dev.ieee_address.to_string() == ieee)
+            .map(|(name, _)| name.clone());
+        if let Some(name) = friendly_name {
+            self.forget_device(&name);
+        }
+    }
+
+    /// Record the group membership `group` declares.
+    fn record_group_members(&mut self, group: &Group, added: bool) {
+        self.group_ids.insert(group.friendly_name.clone(), group.id);
+        let reference = GroupRef {
+            id: group.id,
+            name: group.friendly_name.clone(),
+        };
+        for member in &group.members {
+            let ieee = member.ieee_address.to_string();
+            if added {
+                self.group_of.insert(ieee, reference.clone());
+            } else {
+                self.group_of.remove(&ieee);
+            }
+        }
+    }
+
     async fn handle_update_light(&mut self, uuid: &Uuid, devupd: &DeviceUpdate) -> ApiResult<()> {
         let upd: LightUpdate = devupd.into();
 
@@ -70,9 +238,15 @@ impl Z2mBackend {
     }
 
     async fn handle_device_message(&mut self, msg: RawMessage) -> ApiResult<()> {
-        if msg.topic.ends_with("/availability") || msg.topic.ends_with("/action") {
-            // availability: https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-availability
+        if let Some(name) = msg.topic.strip_suffix("/availability") {
+            // https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-availability
+            self.handle_availability(name, &msg.payload);
+            return Ok(());
+        }
+
+        if msg.topic.ends_with("/action") {
             // action: https://www.home-assistant.io/integrations/device_trigger.mqtt/
+            self.touch_device(&msg.topic);
             return Ok(());
         }
 
@@ -87,6 +261,7 @@ impl Z2mBackend {
             return Ok(());
         };
 
+        self.touch_device(&msg.topic);
         let res = self.handle_update(&val.rid, &msg.payload).await;
         if let Err(ref err) = res {
             log::error!(
@@ -117,8 +292,10 @@ impl Z2mBackend {
                     self.name,
                     dev.friendly_name
                 );
-                self.ignore.insert(dev.friendly_name.to_string());
+                self.ignore.insert(dev.friendly_name.clone());
             }
+
+            self.publish_device(dev);
             /*
             if dev.expose_action() {
                 log::info!(
@@ -132,6 +309,8 @@ impl Z2mBackend {
             }
             */
         }
+
+        self.sync_placement().await;
 
         Ok(())
     }
@@ -155,18 +334,34 @@ impl Z2mBackend {
             self.rmap.retain(|_, v| *v != data.id);
         }
 
+        self.forget_device(&data.id);
+
         Ok(())
+    }
+
+    /// Drop a device from everything that tracks it, by friendly name.
+    fn forget_device(&mut self, friendly_name: &str) {
+        self.ignore.remove(friendly_name);
+        let Some(dev) = self.network.remove(friendly_name) else {
+            return;
+        };
+
+        let ieee = dev.ieee_address.to_string();
+        self.group_of.remove(&ieee);
+        if let Some(inventory) = self.inventory() {
+            inventory.remove(&self.name, &ieee);
+        }
     }
 
     #[allow(clippy::collapsible_else_if)]
     async fn bridge_group_member_change(
-        &self,
+        &mut self,
         change: &GroupMemberChange,
         added: bool,
     ) -> ApiResult<()> {
-        if let Some(light) = self.map.get(&change.device) {
+        if let Some(light) = self.map.get(&change.device).copied() {
             let mut lock = self.state.lock().await;
-            let device = lock.get::<Light>(light)?.clone();
+            let device = lock.get::<Light>(&light)?.clone();
 
             let device_link = device.owner;
             if let Some(room) = self.map.get(&change.group) {
@@ -192,6 +387,25 @@ impl Z2mBackend {
             }
         }
 
+        // the membership is what the inventory's group hop reads
+        if let Some(ieee) = self.device_ieee(&change.device) {
+            if added {
+                if let Some(id) = self.group_ids.get(&change.group).copied() {
+                    self.group_of.insert(
+                        ieee,
+                        GroupRef {
+                            id,
+                            name: change.group.clone(),
+                        },
+                    );
+                }
+            } else {
+                self.group_of.remove(&ieee);
+            }
+        }
+
+        self.sync_placement().await;
+
         Ok(())
     }
 
@@ -201,12 +415,18 @@ impl Z2mBackend {
             Message::BridgeInfo(obj) => { /* println!("{obj:#?}"); */ }
             Message::BridgeLogging(obj) => { /* println!("{obj:#?}"); */ }
             Message::BridgeExtensions(obj) => { /* println!("{obj:#?}"); */ }
-            Message::BridgeEvent(obj) => { /* println!("{obj:#?}"); */ }
+            Message::BridgeEvent(obj) => {
+                self.handle_bridge_event_record(obj);
+            }
             Message::BridgeDefinitions(obj) => { /* println!("{obj:#?}"); */ }
-            Message::BridgeState(obj) => { /* println!("{obj:#?}"); */ }
+            Message::BridgeState(obj) => {
+                self.handle_bridge_state(obj);
+            }
             Message::BridgeConverters(obj) => { /* println!("{obj:#?}"); */ }
             Message::BridgeOptions(obj) => { /* println!("{obj:#?}"); */ }
-            Message::BridgePermitJoin(obj) => {}
+            Message::BridgePermitJoin(obj) => {
+                self.handle_permit_join(obj);
+            }
             Message::BridgeTouchlinkScan(obj) => {}
             Message::BridgeDeviceOptions(obj) => {}
             Message::BridgeNetworkmap(obj) => {}
@@ -225,8 +445,10 @@ impl Z2mBackend {
             Message::BridgeGroups(obj) => {
                 /* println!("{obj:#?}"); */
                 for grp in obj {
+                    self.record_group_members(grp, true);
                     self.add_group(grp).await?;
                 }
+                self.sync_placement().await;
             }
 
             Message::BridgeGroupMembersAdd(change) | Message::BridgeGroupMembersRemove(change) => {

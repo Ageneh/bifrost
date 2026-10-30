@@ -1,0 +1,226 @@
+[
+ {
+  "topic": "bridge/state",
+  "payload": {
+   "state": "online"
+  }
+ },
+ {
+  "topic": "bridge/info",
+  "payload": {
+   "commit": "0f0f0f0",
+   "config": {
+    "advanced": {
+     "adapter_concurrent": null,
+     "adapter_delay": null,
+     "cache_state": true,
+     "cache_state_persistent": true,
+     "cache_state_send_on_startup": true,
+     "channel": 15,
+     "elapsed": false,
+     "ext_pan_id": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "homeassistant_legacy_entity_attributes": true,
+     "last_seen": "ISO_8601",
+     "log_debug_namespace_ignore": "",
+     "log_debug_to_mqtt_frontend": false,
+     "log_directory": "",
+     "log_file": "",
+     "log_level": "info",
+     "log_namespaced_levels": {},
+     "log_output": [
+      "console"
+     ],
+     "log_rotation": false,
+     "log_symlink_current": false,
+     "log_syslog": {},
+     "output": "json",
+     "pan_id": 6754,
+     "timestamp_format": "YYYY-MM-DD HH:mm:ss"
+    },
+    "availability": {
+     "enabled": true,
+     "passive": false
+    },
+    "version": 4,
+    "blocklist": [],
+    "device_options": {},
+    "devices": {
+     "0x0017880100000001": {
+      "friendly_name": "Kitchen ceiling"
+     }
+    },
+    "external_converters": [],
+    "frontend": {
+     "enabled": false,
+     "port": 8080
+    },
+    "groups": {
+     "1": {
+      "devices": [
+       "Kitchen ceiling",
+       "Hall lamp"
+      ],
+      "friendly_name": "Kitchen"
+     }
+    },
+    "homeassistant": false,
+    "map_options": {
+     "graphviz": {
+      "colors": {
+       "fill": []
+      }
+     }
+    },
+    "mqtt": {
+     "base_topic": "zigbee2mqtt",
+     "server": "mqtt://127.0.0.1:1883"
+    },
+    "ota": {
+     "update_check_interval": 0
+    },
+    "passlist": [],
+    "serial": {
+     "adapter": "zstack",
+     "disable_led": false,
+     "port": "/dev/ttyACM0"
+    }
+   },
+   "config_schema": {
+    "definitions": {},
+    "required": [],
+    "properties": {},
+    "type": "object"
+   },
+   "coordinator": {
+    "ieee_address": "0x00124b0000000001",
+    "meta": {
+     "major": 1
+    },
+    "type": "zStack3x0"
+   },
+   "log_level": "info",
+   "network": {
+    "channel": 15,
+    "extended_pan_id": "0x00124b0000000001",
+    "pan_id": 6754
+   },
+   "permit_join": false,
+   "restart_required": false,
+   "version": "2.1.1",
+   "zigbee_herdsman": {
+    "version": "2.1.1"
+   },
+   "zigbee_herdsman_converters": {
+    "version": "21.0.0"
+   }
+  }
+ },
+ {
+  "topic": "bridge/devices",
+  "payload": [
+   {
+    "description": "Smart plug",
+    "date_code": null,
+    "disabled": false,
+    "definition": {
+     "model": "SP 120",
+     "vendor": "Innr",
+     "description": "Smart plug",
+     "supports_ota": false,
+     "options": [],
+     "icon": "",
+     "exposes": [
+      {
+       "type": "switch",
+       "name": "state",
+       "label": "State",
+       "property": "state",
+       "access": 7,
+       "value_on": "ON",
+       "value_off": "OFF",
+       "description": "On/off state of the switch"
+      },
+      {
+       "type": "numeric",
+       "name": "power",
+       "label": "Power",
+       "property": "power",
+       "access": 1,
+       "unit": "W",
+       "description": "Instantaneous measured power"
+      },
+      {
+       "type": "numeric",
+       "name": "linkquality",
+       "label": "Linkquality",
+       "property": "linkquality",
+       "access": 1,
+       "unit": "lqi",
+       "value_min": 0,
+       "value_max": 255,
+       "category": "diagnostic"
+      }
+     ]
+    },
+    "endpoints": {
+     "1": {
+      "bindings": [],
+      "configured_reportings": [],
+      "clusters": {
+       "input": [],
+       "output": []
+      },
+      "scenes": []
+     }
+    },
+    "friendly_name": "Desk plug",
+    "ieee_address": "0x00158d0000000010",
+    "interview_completed": true,
+    "interviewing": false,
+    "manufacturer": "Innr",
+    "model_id": "SP 120",
+    "network_address": 2016,
+    "power_source": "Mains (single phase)",
+    "software_build_id": null,
+    "supported": true,
+    "type": "EndDevice"
+   }
+  ]
+ },
+ {
+  "topic": "bridge/groups",
+  "payload": [
+   {
+    "friendly_name": "Kitchen",
+    "description": null,
+    "id": 1,
+    "members": [
+     {
+      "endpoint": 11,
+      "ieee_address": "0x0017880100000001"
+     },
+     {
+      "endpoint": 11,
+      "ieee_address": "0x0017880100000002"
+     }
+    ],
+    "scenes": []
+   }
+  ]
+ },
+ {
+  "topic": "Desk plug/availability",
+  "payload": {
+   "state": "online"
+  }
+ }
+]

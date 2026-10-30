@@ -7,7 +7,8 @@ pub mod websocket;
 pub mod zclcommand;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -20,7 +21,7 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::sync::broadcast::Receiver;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
 };
@@ -35,6 +36,7 @@ use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
+use crate::inventory::{GroupRef, Inventory};
 use crate::model::throttle::Throttle;
 use crate::resource::Resources;
 use crate::server::appstate::AppState;
@@ -43,6 +45,77 @@ use crate::server::appstate::AppState;
 pub enum TemplateError {
     #[error("No config found for z2m server {0:?}")]
     NotFound(String),
+}
+
+/// A command addressed to exactly one z2m backend.
+///
+/// The admin API reaches a backend through the channel registered under its
+/// server name, so a command never reaches the other servers. Each command
+/// carries the way to answer, so a route can report the failure instead of
+/// guessing.
+#[derive(Debug)]
+pub enum Z2mCommand {
+    /// Make one device flash, so a person can tell which bulb it is.
+    Identify {
+        device: String,
+        seconds: u32,
+        reply: oneshot::Sender<ApiResult<()>>,
+    },
+    /// Open this server's join window, and no other server's.
+    PermitJoin {
+        time: u32,
+        device: Option<String>,
+        reply: oneshot::Sender<ApiResult<()>>,
+    },
+}
+
+/// The command channel of every running backend, by server name.
+#[derive(Debug, Default)]
+pub struct BackendCommands {
+    next_token: AtomicU64,
+    senders: StdMutex<HashMap<String, (u64, mpsc::UnboundedSender<Z2mCommand>)>>,
+}
+
+impl BackendCommands {
+    /// Claim a channel for the backend named `server`.
+    ///
+    /// The returned token identifies this instance, so a backend that is
+    /// being replaced does not deregister its successor.
+    pub fn register(&self, server: &str) -> (u64, mpsc::UnboundedReceiver<Z2mCommand>) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let token = self.next_token.fetch_add(1, Ordering::Relaxed);
+
+        let mut senders = self.senders.lock().unwrap_or_else(PoisonError::into_inner);
+        senders.insert(server.to_string(), (token, sender));
+        drop(senders);
+
+        (token, receiver)
+    }
+
+    /// Give up the channel claimed by `token`, if it is still the current one.
+    pub fn unregister(&self, server: &str, token: u64) {
+        let mut senders = self.senders.lock().unwrap_or_else(PoisonError::into_inner);
+        if senders
+            .get(server)
+            .is_some_and(|(current, _)| *current == token)
+        {
+            senders.remove(server);
+        }
+    }
+
+    /// The channel of the running backend named `server`.
+    #[must_use]
+    pub fn sender(&self, server: &str) -> Option<mpsc::UnboundedSender<Z2mCommand>> {
+        let senders = self.senders.lock().unwrap_or_else(PoisonError::into_inner);
+        senders.get(server).map(|(_, sender)| sender.clone())
+    }
+
+    /// The names of the backends that are reachable right now.
+    #[must_use]
+    pub fn running(&self) -> Vec<String> {
+        let senders = self.senders.lock().unwrap_or_else(PoisonError::into_inner);
+        senders.keys().cloned().collect()
+    }
 }
 
 pub struct Z2mServiceTemplate {
@@ -68,7 +141,9 @@ impl ServiceTemplate for Z2mServiceTemplate {
             self.state.store(),
             self.state.res.clone(),
         )
-        .map_err(SvcError::generation)?;
+        .map_err(SvcError::generation)?
+        .with_inventory(self.state.inventory())
+        .with_commands(self.state.backends());
 
         Ok(svc.boxed())
     }
@@ -84,11 +159,23 @@ pub struct Z2mBackend {
     learner: SceneLearn,
     ignore: HashSet<String>,
     network: HashMap<String, z2m::api::Device>,
+    /// The z2m group each device belongs to, by IEEE address.
+    group_of: HashMap<String, GroupRef>,
+    /// The id of each z2m group, by friendly name.
+    group_ids: HashMap<String, u32>,
     entstream: Option<EntStream>,
     counter: u32,
     fps: u32,
     throttle: Throttle,
     socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    /// Where what this backend learns is published. Absent in a unit test
+    /// that drives the backend without one.
+    inventory: Option<Arc<Inventory>>,
+    /// The channel the admin API reaches this backend on.
+    commands: Option<Arc<BackendCommands>>,
+    /// This instance's claim on that channel, taken when it starts.
+    command_token: Option<u64>,
+    command_rx: Option<mpsc::UnboundedReceiver<Z2mCommand>>,
 
     // for sending delayed messages over the websocket
     message_rx: mpsc::UnboundedReceiver<(String, DeviceUpdate)>,
@@ -111,6 +198,8 @@ impl Z2mBackend {
         let ignore = HashSet::new();
         let learner = SceneLearn::new(name.clone());
         let network = HashMap::new();
+        let group_of = HashMap::new();
+        let group_ids = HashMap::new();
         let entstream = None;
         let throttle = Throttle::from_fps(fps);
         let (message_tx, message_rx) = mpsc::unbounded_channel();
@@ -124,6 +213,8 @@ impl Z2mBackend {
             learner,
             ignore,
             network,
+            group_of,
+            group_ids,
             entstream,
             throttle,
             fps,
@@ -131,14 +222,51 @@ impl Z2mBackend {
             message_tx,
             socket: None,
             counter: 0,
+            inventory: None,
+            commands: None,
+            command_token: None,
+            command_rx: None,
         })
+    }
+
+    /// Publish what this backend learns into `inventory`.
+    ///
+    /// A separate step rather than another argument to [`Self::new`]: the
+    /// constructor stays about the server's own configuration.
+    #[must_use]
+    pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
+        self.inventory = Some(inventory);
+        self
+    }
+
+    /// Let the admin API reach this backend by its server name.
+    #[must_use]
+    pub fn with_commands(mut self, commands: Arc<BackendCommands>) -> Self {
+        self.commands = Some(commands);
+        self
+    }
+
+    /// The registry this backend publishes into, when it has one.
+    pub(crate) const fn inventory(&self) -> Option<&Arc<Inventory>> {
+        self.inventory.as_ref()
+    }
+
+    /// Give up this instance's claim on its command channel.
+    fn release_commands(&mut self) {
+        let (Some(commands), Some(token)) = (&self.commands, self.command_token.take()) else {
+            return;
+        };
+        commands.unregister(&self.name, token);
+        self.command_rx = None;
     }
 
     pub async fn event_loop(
         &mut self,
         chan: &mut Receiver<Arc<BackendRequest>>,
         mut socket: Z2mWebSocket,
+        commands: Option<&mut mpsc::UnboundedReceiver<Z2mCommand>>,
     ) -> ApiResult<()> {
+        let mut commands = commands;
         loop {
             select! {
                 // all backend event handling implemented in backend::z2m::backend_event
@@ -157,8 +285,49 @@ impl Z2mBackend {
                 Some((topic, upd)) = self.message_rx.recv() => {
                     socket.send_update(&topic, &upd).await?;
                 }
+
+                // a command from the admin API, addressed to this server only
+                Some(command) = recv_command(&mut commands) => {
+                    self.handle_command(&mut socket, command).await;
+                }
             };
         }
+    }
+
+    /// Carry out a command addressed to this backend and answer it.
+    ///
+    /// The answer is the send result, so a route reports a broken socket
+    /// rather than claiming the device flashed.
+    async fn handle_command(&self, z2mws: &mut Z2mWebSocket, command: Z2mCommand) {
+        match command {
+            Z2mCommand::Identify {
+                device,
+                seconds,
+                reply,
+            } => {
+                let result = z2mws.send_identify(&device, seconds).await;
+                let _ = reply.send(result);
+            }
+            Z2mCommand::PermitJoin {
+                time,
+                device,
+                reply,
+            } => {
+                let result = z2mws.send_permit_join(time, device).await;
+                let _ = reply.send(result);
+            }
+        }
+    }
+}
+
+/// Await the next command, or nothing at all when this backend has no
+/// channel.
+async fn recv_command(
+    commands: &mut Option<&mut mpsc::UnboundedReceiver<Z2mCommand>>,
+) -> Option<Z2mCommand> {
+    match commands {
+        Some(commands) => commands.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -223,18 +392,46 @@ impl Service for Z2mBackend {
 
     async fn run(&mut self) -> ApiResult<()> {
         if let Some(socket) = self.socket.take() {
+            let inventory = self.inventory.clone();
+            let commands = self.commands.clone();
+
+            if let Some(inventory) = &inventory {
+                inventory.server_up(&self.name);
+            }
+            if let Some(commands) = &commands {
+                let (token, receiver) = commands.register(&self.name);
+                self.command_token = Some(token);
+                self.command_rx = Some(receiver);
+            }
+
             let z2m_socket = Z2mWebSocket::new(self.name.clone(), socket);
             let mut chan = self.state.lock().await.backend_event_stream();
-            let res = self.event_loop(&mut chan, z2m_socket).await;
+            let mut command_rx = self.command_rx.take();
+            let res = self
+                .event_loop(&mut chan, z2m_socket, command_rx.as_mut())
+                .await;
+            self.command_rx = command_rx;
+
             if let Err(err) = res {
                 log::error!("[{}] Event loop broke: {err}", self.name);
             }
+
+            // a backend that stopped is not gone: its devices stay listed,
+            // but nothing is known to be reachable any more
+            if let Some(inventory) = &inventory {
+                inventory.server_down(&self.name);
+            }
+            self.release_commands();
         }
         Ok(())
     }
 
     async fn stop(&mut self) -> ApiResult<()> {
         self.socket.take();
+        if let Some(inventory) = &self.inventory {
+            inventory.server_down(&self.name);
+        }
+        self.release_commands();
         Ok(())
     }
 }

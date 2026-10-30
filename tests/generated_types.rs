@@ -21,6 +21,11 @@ use bifrost_api::admin::{
 use bifrost_api::config::{
     AppConfig, AuthConfig, BifrostConfig, BridgeConfig, RoomConfig, Z2mServer,
 };
+use bifrost_api::inventory::{
+    Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
+    InventorySnapshot, InventoryUpdate, PermitJoinRequest, PermitJoinResponse, PermitJoinState,
+    ResourceRef, RoomRef, ServerInfo,
+};
 use bifrost_api::service::{Service, ServiceList};
 use svc::traits::ServiceState;
 use ts_rs::{Config, TS};
@@ -77,6 +82,22 @@ fn export_typescript_bindings() {
     ApplyResponse::export_all(&cfg).unwrap();
     ErrorResponse::export_all(&cfg).unwrap();
     SetupStatus::export_all(&cfg).unwrap();
+
+    Availability::export_all(&cfg).unwrap();
+    Capabilities::export_all(&cfg).unwrap();
+    DeviceInfo::export_all(&cfg).unwrap();
+    DeviceType::export_all(&cfg).unwrap();
+    ExposeSummary::export_all(&cfg).unwrap();
+    GroupRef::export_all(&cfg).unwrap();
+    IdentifyRequest::export_all(&cfg).unwrap();
+    InventorySnapshot::export_all(&cfg).unwrap();
+    InventoryUpdate::export_all(&cfg).unwrap();
+    PermitJoinRequest::export_all(&cfg).unwrap();
+    PermitJoinResponse::export_all(&cfg).unwrap();
+    PermitJoinState::export_all(&cfg).unwrap();
+    ResourceRef::export_all(&cfg).unwrap();
+    RoomRef::export_all(&cfg).unwrap();
+    ServerInfo::export_all(&cfg).unwrap();
 
     SessionResponse::export_all(&cfg).unwrap();
     LoginRequest::export_all(&cfg).unwrap();

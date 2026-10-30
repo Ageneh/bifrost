@@ -19,7 +19,7 @@ export interface NavItem {
 /** The frozen set, in order. */
 const items: NavItem[] = [
   { key: 'home', label: 'Home', path: '/' },
-  { key: 'devices', label: 'Devices', path: '/devices', pending: true },
+  { key: 'devices', label: 'Devices', path: '/devices' },
   { key: 'rooms', label: 'Rooms', path: '/rooms', pending: true },
   { key: 'entertainment', label: 'Entertainment', path: '/entertainment', pending: true },
   { key: 'pairing', label: 'Pairing', path: '/pairing', pending: true },

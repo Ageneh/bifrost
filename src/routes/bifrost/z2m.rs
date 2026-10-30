@@ -12,6 +12,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::routing::get;
+use chrono::Utc;
 use hyper::StatusCode;
 use serde_json::Value;
 use svc::traits::ServiceState;
@@ -19,7 +20,9 @@ use svc::traits::ServiceState;
 use bifrost_api::admin::{
     DraftResponse, RevisionRequest, Z2mServerEntry, Z2mServerList, Z2mServerWrite,
 };
+use bifrost_api::inventory::{PermitJoinRequest, PermitJoinResponse};
 
+use crate::backend::z2m::Z2mCommand;
 use crate::config::redact::{redact, redacted};
 use crate::config::validate::ValidationError;
 use crate::routes::bifrost::config::{ConfigApiError, ConfigApiResult, patch_draft};
@@ -135,13 +138,116 @@ async fn delete_server(
     Ok(Json(patch_draft(&state, req.revision, &patch)?))
 }
 
+/// The join window a new device may use, when the screen does not say.
+const DEFAULT_PERMIT_JOIN_SECONDS: u32 = 60;
+
+/// The longest window z2m accepts.
+const MAX_PERMIT_JOIN_SECONDS: u32 = 254;
+
+/// How long a permit-join waits for the backend to write it to the socket.
+const PERMIT_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The join window of `name`, as far as the inventory knows.
+#[allow(clippy::result_large_err)]
+async fn get_permit_join(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<PermitJoinResponse>, Response> {
+    if !state.config().z2m.servers.contains_key(&name) {
+        return Err(refuse(
+            StatusCode::NOT_FOUND,
+            &format!("No z2m server is configured as {name:?}"),
+        ));
+    }
+
+    let permit_join = state
+        .inventory()
+        .server(&name)
+        .map(|server| server.permit_join)
+        .unwrap_or_default();
+
+    Ok(Json(PermitJoinResponse {
+        server: name,
+        time: permit_join.remaining_seconds(Utc::now()),
+        device: permit_join.device,
+    }))
+}
+
+/// Open the join window of one server.
+///
+/// The command goes to that server's backend and to no other: a window is
+/// per z2m server, and opening every server at once is exactly what this
+/// route must not do.
+#[allow(clippy::result_large_err)]
+async fn post_permit_join(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(request): Json<PermitJoinRequest>,
+) -> Result<Json<PermitJoinResponse>, Response> {
+    if !state.config().z2m.servers.contains_key(&name) {
+        return Err(refuse(
+            StatusCode::NOT_FOUND,
+            &format!("No z2m server is configured as {name:?}"),
+        ));
+    }
+
+    let time = request
+        .time
+        .unwrap_or(DEFAULT_PERMIT_JOIN_SECONDS)
+        .min(MAX_PERMIT_JOIN_SECONDS);
+
+    let Some(sender) = state.backends().sender(&name) else {
+        return Err(refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!("The z2m server {name:?} is not running, so it cannot open a join window"),
+        ));
+    };
+
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    let command = Z2mCommand::PermitJoin {
+        time,
+        device: request.device.clone(),
+        reply,
+    };
+
+    if sender.send(command).is_err() {
+        return Err(refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!("The z2m server {name:?} stopped accepting commands"),
+        ));
+    }
+
+    match tokio::time::timeout(PERMIT_JOIN_TIMEOUT, answer).await {
+        Ok(Ok(Ok(()))) => Ok(Json(PermitJoinResponse {
+            server: name,
+            time,
+            device: request.device,
+        })),
+        Ok(Ok(Err(err))) => Err(refuse(StatusCode::BAD_GATEWAY, &err.to_string())),
+        Ok(Err(_)) => Err(refuse(
+            StatusCode::BAD_GATEWAY,
+            "The backend did not answer the permit join",
+        )),
+        Err(_) => Err(refuse(
+            StatusCode::GATEWAY_TIMEOUT,
+            "The backend did not take the permit join in time",
+        )),
+    }
+}
+
 /// The z2m routes, mounted by the `/bifrost` nest and therefore behind the
 /// same guard as every other admin route.
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(list_servers)).route(
-        "/{name}",
-        get(get_server).put(put_server).delete(delete_server),
-    )
+    Router::new()
+        .route("/", get(list_servers))
+        .route(
+            "/{name}/permit_join",
+            get(get_permit_join).post(post_permit_join),
+        )
+        .route(
+            "/{name}",
+            get(get_server).put(put_server).delete(delete_server),
+        )
 }
 
 #[cfg(test)]
@@ -346,6 +452,50 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["errors"][0]["path"], "z2m.with@at");
+    }
+
+    #[tokio::test]
+    async fn permit_join_of_an_unknown_server_is_not_found() {
+        let fixture = Fixture::new().await;
+
+        let (status, _) = fixture
+            .call(Method::GET, "/missing/permit_join", None)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _) = fixture
+            .call(
+                Method::POST,
+                "/missing/permit_join",
+                Some(json!({"time": 30})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn permit_join_reports_a_server_that_is_not_running() {
+        let fixture = Fixture::new().await;
+
+        // no backend is registered in this fixture, so nothing can be sent
+        let (status, body) = fixture
+            .call(
+                Method::POST,
+                "/server1/permit_join",
+                Some(json!({"time": 30})),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(body["error"].as_str().unwrap().contains("not running"));
+
+        // a closed window reads as zero, not as an error
+        let (status, body) = fixture
+            .call(Method::GET, "/server1/permit_join", None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["time"], 0);
+        assert_eq!(body["server"], "server1");
     }
 
     #[tokio::test]

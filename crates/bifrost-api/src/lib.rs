@@ -2,6 +2,7 @@ pub mod admin;
 pub mod backend;
 pub mod config;
 pub mod error;
+pub mod inventory;
 pub mod service;
 pub mod websocket;
 

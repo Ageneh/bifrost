@@ -4,14 +4,17 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::Response;
 use tokio::select;
+use tokio::sync::broadcast;
 
 use bifrost_api::backend::BackendRequest;
+use bifrost_api::inventory::InventoryUpdate;
 use bifrost_api::service::Service;
 use bifrost_api::websocket::Update;
 use hue::event::EventBlock;
 use svc::manager::{ServiceEvent, SvmClient};
 
 use crate::config::redact::redacted_app_config;
+use crate::inventory::InventoryEvent;
 use crate::logbuffer;
 use crate::routes::bifrost::BifrostApiResult;
 use crate::server::appstate::AppState;
@@ -52,6 +55,24 @@ impl WebSocketTask {
         Ok(Some(Update::BackendRequest((**backend_event).clone())))
     }
 
+    /// A change to the inventory. A socket that fell behind re-reads the
+    /// snapshot, which is the same state a fresh one would get.
+    fn handle_inventory_event(
+        &self,
+        event: Result<InventoryEvent, broadcast::error::RecvError>,
+    ) -> BifrostApiResult<Option<Update>> {
+        match event {
+            Ok(event) => Ok(Some(Update::Inventory(event.into()))),
+            Err(broadcast::error::RecvError::Lagged(missed)) => {
+                log::warn!("Inventory subscriber lagged {missed} events; resending the snapshot");
+                Ok(Some(Update::Inventory(InventoryUpdate::Snapshot(
+                    self.state.inventory().snapshot(),
+                ))))
+            }
+            Err(broadcast::error::RecvError::Closed) => Ok(None),
+        }
+    }
+
     fn handle_hue_event(&self, hue_event: HueEventRecord) -> BifrostApiResult<Option<Update>> {
         log::info!("Hue event: {hue_event:?}");
         Ok(Some(Update::HueEvent(hue_event.block)))
@@ -90,11 +111,21 @@ impl WebSocketTask {
         let mut svc_events = self.mgr.subscribe().await?.1;
         let mut log_events = logbuffer::shared().subscribe();
 
+        // subscribe before the snapshot is taken, so a change that lands in
+        // between is queued rather than missed
+        let inventory = self.state.inventory();
+        let mut inventory_events = inventory.subscribe();
+
         let app_config = redacted_app_config(&self.state.config())?;
         self.send(Update::AppConfig(app_config)).await?;
 
         self.send(Update::HueEvent(EventBlock::add(hue_state)))
             .await?;
+
+        self.send(Update::Inventory(InventoryUpdate::Snapshot(
+            inventory.snapshot(),
+        )))
+        .await?;
 
         loop {
             let reply = select! {
@@ -103,6 +134,7 @@ impl WebSocketTask {
                 service_event = svc_events.recv() => self.handle_service_event(service_event).await,
                 log_event = log_events.recv() => Ok(log_event.ok().map(Update::Log)),
                 hue_event = hue_events.recv() => self.handle_hue_event(hue_event?),
+                inventory_event = inventory_events.recv() => self.handle_inventory_event(inventory_event),
             };
 
             if let Some(reply) = reply? {

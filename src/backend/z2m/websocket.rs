@@ -166,6 +166,19 @@ impl Z2mWebSocket {
 
         self.send("", &z2mreq).await
     }
+
+    /// Ask z2m to make a device flash for `seconds`.
+    #[allow(clippy::result_large_err)]
+    pub async fn send_identify(&mut self, device: &str, seconds: u32) -> ApiResult<()> {
+        let message = RawMessage {
+            topic: "bridge/request/device/identify".into(),
+            payload: serde_json::json!({"name": device, "value": seconds}),
+        };
+
+        log::debug!("[{}] Sending {message:?}", self.name);
+        let msg = Message::text(serde_json::to_string(&message)?);
+        Ok(self.socket.send(msg).await?)
+    }
 }
 
 impl Stream for Z2mWebSocket
