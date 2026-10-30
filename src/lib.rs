@@ -6,6 +6,7 @@ pub mod model;
 pub mod resource;
 pub mod routes;
 pub mod server;
+pub mod service_registry;
 
 #[cfg(test)]
 mod testutil;
