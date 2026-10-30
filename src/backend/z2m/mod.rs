@@ -171,7 +171,15 @@ impl Service for Z2mBackend {
         let sanitized_url = self.server.get_sanitized_url();
         let url = self.server.get_url();
 
-        if url != self.server.url {
+        // a token from the token field is appended by design; only a path
+        // rewrite is worth a hint then
+        let rewritten = if self.server.token.is_some() {
+            url.path() != self.server.url.path()
+        } else {
+            url != self.server.url
+        };
+
+        if rewritten {
             log::info!(
                 "[{}] Rewrote url for compatibility with z2m 2.x.",
                 self.name

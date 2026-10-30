@@ -112,7 +112,7 @@ fn check_z2m_servers(config: &AppConfig, errors: &mut Vec<ValidationError>) {
             ));
         }
 
-        let has_token = url.query_pairs().any(|(key, _)| key == "token");
+        let has_token = server.token.is_some() || url.query_pairs().any(|(key, _)| key == "token");
         if url.path().ends_with(Z2M_V2_PATH_SUFFIX) && !has_token {
             errors.push(ValidationError::warning(
                 &path,
@@ -377,6 +377,37 @@ mod tests {
         let server = config.z2m.servers.get_mut("server1").unwrap();
         server.url = "ws://10.0.0.1:8080/api?token=abc".parse().unwrap();
         assert_eq!(validate(&config), NONE);
+    }
+
+    #[test]
+    fn z2m_v2_url_with_token_field_accepted() {
+        let mut config = minimal();
+        let server = config.z2m.servers.get_mut("server1").unwrap();
+        server.url = "ws://10.0.0.1:8080/api".parse().unwrap();
+        server.token = Some("abc".into());
+        assert_eq!(validate(&config), NONE);
+    }
+
+    #[test]
+    fn unknown_room_key_in_parsed_config_warns() {
+        let config = parse(&format!(
+            "{MINIMAL_CONFIG}rooms:\n  office:\n    nmae: typo\n"
+        ));
+        assert_eq!(
+            paths(&validate(&config), Severity::Warning),
+            ["rooms.office.nmae"]
+        );
+    }
+
+    #[test]
+    fn max_streams_zero_in_parsed_config_rejected() {
+        let config = parse(&format!(
+            "{MINIMAL_CONFIG}bifrost:\n  entertainment:\n    max_streams: 0\n"
+        ));
+        assert_eq!(
+            paths(&validate(&config), Severity::Error),
+            ["bifrost.entertainment.max_streams"]
+        );
     }
 
     #[test]

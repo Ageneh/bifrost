@@ -254,10 +254,16 @@ impl ConfigStore {
         let mut draft = write(&self.draft);
         self.check_revision(expected_revision)?;
 
-        let applied = draft
+        let mut applied = draft
             .as_ref()
             .map(|draft| draft.config.clone())
             .ok_or(ConfigStoreError::NoDraft)?;
+
+        // tokens given in the url query move to the token field on the
+        // first apply; get_url() builds the same url from either
+        if applied.migrate_url_tokens() {
+            log::info!("Moved z2m tokens from url queries to the token field");
+        }
 
         let errors = validate::new_errors(&read(&self.active), &applied);
         if !errors.is_empty() {
@@ -279,8 +285,8 @@ impl ConfigStore {
 
         Ok(ApplyOutcome {
             revision: self.next_revision(),
-            plan: diff::plan(&previous, &applied),
-            changes: diff::diff(&previous, &applied),
+            plan: diff::plan(&migrated(&previous), &applied),
+            changes: diff::diff(&migrated(&previous), &applied),
             previous,
             applied,
         })
@@ -293,6 +299,14 @@ impl ConfigStore {
             Err(err) => Err(err),
         }
     }
+}
+
+/// `config` with url tokens migrated, so the migration alone never shows
+/// up as a change.
+fn migrated(config: &AppConfig) -> AppConfig {
+    let mut config = config.clone();
+    config.migrate_url_tokens();
+    config
 }
 
 fn remove_if_exists(path: &Utf8Path) -> io::Result<()> {

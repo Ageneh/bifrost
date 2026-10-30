@@ -702,6 +702,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn token_field_is_write_only() {
+        let fixture = Fixture::new().await;
+        let unguarded = router().with_state(fixture.state.clone());
+
+        // the first apply moves the url token into the token field
+        fixture.put_draft(0, fixture.active_document().await).await;
+        fixture
+            .call(Method::POST, "/apply", Some(json!({"revision": 1})))
+            .await;
+        let (_, active) = call(&unguarded, Method::GET, "/", None).await;
+        assert_eq!(active["z2m"]["server1"]["token"], REDACTED);
+        assert_eq!(active["z2m"]["server1"]["url"], "ws://10.0.0.100:8080/api");
+
+        // null keeps the token
+        let mut config = active.clone();
+        config["z2m"]["server1"]["token"] = Value::Null;
+        fixture.put_draft(2, config).await;
+        let draft = fixture.state.store().draft().unwrap().config;
+        assert_eq!(draft.z2m.servers["server1"].token.as_deref(), Some(SECRET));
+
+        // "" clears it
+        let mut config = active;
+        config["z2m"]["server1"]["token"] = json!("");
+        fixture.put_draft(3, config).await;
+        let draft = fixture.state.store().draft().unwrap().config;
+        assert_eq!(draft.z2m.servers["server1"].token, None);
+
+        let (_, changes) = fixture.call(Method::GET, "/diff", None).await;
+        assert_eq!(
+            changes,
+            json!([{"path": "z2m.server1.token", "before": REDACTED, "after": null, "secret": true}])
+        );
+    }
+
+    #[tokio::test]
     async fn admin_api_is_guarded() {
         let fixture = Fixture::new().await;
         let guarded = router().with_state(fixture.state.clone());

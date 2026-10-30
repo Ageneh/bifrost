@@ -1,6 +1,12 @@
 ## Configuration reference
 
-Bifrost
+Bifrost reads `config.yaml` from the working directory. To use another file,
+start Bifrost with `--config <path>`, or set the `BIFROST_CONFIG` environment
+variable. Relative `state_file` and `cert_file` paths resolve against the
+directory of the configuration file.
+
+Settings Bifrost does not recognize are kept: saving the configuration through
+the admin API writes them back unchanged.
 
 ```yaml
 # Bifrost section [optional!]
@@ -79,6 +85,17 @@ z2m:
     #   is the resuling config:
     #
     url: ws://10.00.0.100:8080/api?token=your-secret-token
+
+    # z2m 2.x auth token [optional!]
+    #
+    # If set, this token is used instead of any "token=" in the url.
+    #
+    # A token given in the url keeps working. The first time a configuration
+    # is applied through the admin API, Bifrost moves it from the url to
+    # this field; the resulting websocket url stays the same.
+    #
+    # The token is a secret: the admin API never shows it.
+    token: your-secret-token
 
   other-with-tls:
     # This will work, but Bifrost will generate a warning that the url has been
@@ -207,7 +224,9 @@ takes effect only when you apply it.
 Every write names the revision it was based on. A stale revision fails with
 `409 Conflict`; read the draft again and retry.
 
-Applying writes `config.yaml.bak` first, then `config.yaml`. The response
+Applying writes `config.yaml.bak` first, then `config.yaml`. The new file is
+generated, so comments from the old one are not carried over; they remain in
+`config.yaml.bak`. The response
 lists which changes took effect immediately (`hot`) and which need a restart
 (`restart_required`). Port and address changes restart the affected
 listeners, and z2m server changes start, stop or re-create that backend. The
