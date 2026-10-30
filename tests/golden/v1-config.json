@@ -1,0 +1,62 @@
+{
+  "UTC": "<time>",
+  "analyticsconsent": false,
+  "apiversion": "1.70.0",
+  "backup": {
+    "errorcode": 0,
+    "status": "idle"
+  },
+  "bridgeid": "001122FFFE334455",
+  "datastoreversion": "176",
+  "dhcp": true,
+  "factorynew": false,
+  "gateway": "127.0.0.1",
+  "internetservices": {
+    "internet": "connected",
+    "remoteaccess": "connected",
+    "swupdate": "connected",
+    "time": "connected"
+  },
+  "ipaddress": "127.0.0.1",
+  "linkbutton": false,
+  "localtime": "<time>",
+  "mac": "00:11:22:33:44:55",
+  "modelid": "BSB002",
+  "name": "Bifrost Bridge",
+  "netmask": "255.0.0.0",
+  "portalconnection": "disconnected",
+  "portalservices": true,
+  "portalstate": {
+    "communication": "disconnected",
+    "incoming": false,
+    "outgoing": false,
+    "signedon": false
+  },
+  "proxyaddress": "none",
+  "proxyport": 0,
+  "replacesbridgeid": null,
+  "starterkitid": "",
+  "swupdate2": {
+    "autoinstall": {
+      "on": true,
+      "updatetime": "<time-of-day>"
+    },
+    "bridge": {
+      "lastinstall": "<time>",
+      "state": "noupdates"
+    },
+    "checkforupdate": false,
+    "lastchange": "<time>",
+    "state": "noupdates"
+  },
+  "swversion": "1970084010",
+  "timezone": "UTC",
+  "whitelist": {
+    "01010101-0202-0303-0404-050505050505": {
+      "create date": "<time>",
+      "last use date": "<time>",
+      "name": "User#foo"
+    }
+  },
+  "zigbeechannel": 25
+}

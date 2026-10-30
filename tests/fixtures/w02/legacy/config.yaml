@@ -1,0 +1,21 @@
+# A configuration in the shape master (12d9e37) reads: no settings added by
+# the GUI programme, and the z2m token inside the websocket URL.
+# scripts/upgrade.sh boots master and then the working tree on a copy.
+bifrost:
+  state_file: state.yaml
+  cert_file: cert.pem
+
+bridge:
+  name: Bifrost
+  mac: 00:11:22:33:44:55
+  ipaddress: 127.0.0.1
+  netmask: 255.0.0.0
+  gateway: 127.0.0.1
+  timezone: UTC
+  http_port: 8302
+  https_port: 8402
+  entm_port: 8502
+
+z2m:
+  server1:
+    url: ws://127.0.0.1:9302/api?token=upgrade-fixture-6f1c2a

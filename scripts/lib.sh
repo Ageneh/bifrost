@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the gate scripts: build a binary, boot it on a fixture
 # directory, wait for it to answer, and stop it again. Sourced, not run.
 #
@@ -10,7 +11,12 @@
 : "${BIFROST_MOCK_Z2M_PORT:=9302}"
 : "${BIFROST_BOOT_TIMEOUT:=10}"
 
+# The master commit every golden file and the upgrade baseline come from.
+# Changing it regenerates history, not a fixture: see tests/golden/README.md.
+BIFROST_MASTER_COMMIT=12d9e37
+
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC2034 # read by the scripts that source this file
 FIXTURES="$REPO_ROOT/tests/fixtures/w02"
 
 BIFROST_PIDS=()
@@ -24,11 +30,46 @@ die() {
     exit 1
 }
 
-# Build the binary from the working tree; prints its path.
+# Run a command, showing its output only when it fails.
+quietly() {
+    local output
+    if ! output=$("$@" 2>&1); then
+        printf '%s\n' "$output" >&2
+        return 1
+    fi
+}
+
+# Build the binary from the working tree, or take BIFROST_BIN when set (a
+# prebuilt binary under test); prints its path.
 build_candidate() {
-    (cd "$REPO_ROOT" && cargo build --locked --quiet --bin bifrost) >&2 \
-        || die "cargo build failed"
+    if [ -n "${BIFROST_BIN:-}" ]; then
+        [ -x "$BIFROST_BIN" ] || die "BIFROST_BIN=$BIFROST_BIN is not executable"
+        printf '%s\n' "$BIFROST_BIN"
+        return
+    fi
+    (cd "$REPO_ROOT" && quietly cargo build --locked --bin bifrost) || die "cargo build failed"
     printf '%s\n' "$REPO_ROOT/target/debug/bifrost"
+}
+
+# Build the pinned master binary from `git archive`, not a worktree, so no
+# checkout is created or touched; cached under target/. Prints its path.
+build_master() {
+    local root="$REPO_ROOT/target/regress/master-$BIFROST_MASTER_COMMIT"
+    if [ ! -f "$root/src/Cargo.toml" ]; then
+        mkdir -p "$root/src"
+        git -C "$REPO_ROOT" archive "$BIFROST_MASTER_COMMIT" | tar -x -C "$root/src" \
+            || die "cannot export $BIFROST_MASTER_COMMIT"
+    fi
+    (cd "$root/src" && quietly cargo build --locked --bin bifrost --target-dir "$root/target") \
+        || die "cargo build of $BIFROST_MASTER_COMMIT failed"
+    printf '%s\n' "$root/target/debug/bifrost"
+}
+
+# Build the mock z2m server; prints its path.
+build_mock_z2m() {
+    (cd "$REPO_ROOT" && quietly cargo build --locked --example mock-z2m) \
+        || die "cargo build of the mock z2m server failed"
+    printf '%s\n' "$REPO_ROOT/target/debug/examples/mock-z2m"
 }
 
 # Write the gate configuration into a fresh fixture directory. Loopback only:
@@ -84,6 +125,31 @@ start_bifrost() {
     BIFROST_PIDS+=("$!")
     wait_for "http://127.0.0.1:$BIFROST_HTTP_PORT/api/config" \
         || die "bifrost did not answer within ${BIFROST_BOOT_TIMEOUT}s; log: $dir/bifrost.log"
+}
+
+# Start the mock z2m server and wait until it accepts connections, so Bifrost
+# does not spend its first connect attempt and a 3 s retry on an empty port.
+start_mock_z2m() {
+    local bin="$1" devices="$2" log="$3" deadline=$((SECONDS + BIFROST_BOOT_TIMEOUT))
+    "$bin" --port "$BIFROST_MOCK_Z2M_PORT" --devices "$devices" --log "$log" >>"$log.stderr" 2>&1 &
+    BIFROST_PIDS+=("$!")
+    # curl exits 7 only while nothing listens
+    while curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$BIFROST_MOCK_Z2M_PORT/"; [ $? -eq 7 ]; do
+        [ "$SECONDS" -lt "$deadline" ] || die "mock z2m did not listen; log: $log.stderr"
+        sleep 0.1
+    done
+}
+
+# Wait until the v2 API lists `count` lights, i.e. the mock's devices landed.
+wait_for_lights() {
+    local count="$1" deadline=$((SECONDS + BIFROST_BOOT_TIMEOUT))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if [ "$(curl -s "http://127.0.0.1:$BIFROST_HTTP_PORT/clip/v2/resource/light" | jq '.data | length')" = "$count" ]; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    die "bifrost did not list $count lights within ${BIFROST_BOOT_TIMEOUT}s"
 }
 
 # Stop everything this script started, newest first.

@@ -1,0 +1,295 @@
+[
+  {
+    "topic": "bridge/devices",
+    "payload": [
+      {
+        "description": null,
+        "date_code": null,
+        "definition": null,
+        "disabled": false,
+        "endpoints": {
+          "1": {
+            "bindings": [],
+            "configured_reportings": [],
+            "clusters": {
+              "input": [],
+              "output": []
+            },
+            "scenes": []
+          }
+        },
+        "friendly_name": "Coordinator",
+        "ieee_address": "0x00124b0000000001",
+        "interview_completed": true,
+        "interviewing": false,
+        "manufacturer": null,
+        "model_id": null,
+        "network_address": 0,
+        "power_source": "Mains (single phase)",
+        "software_build_id": null,
+        "supported": true,
+        "type": "Coordinator"
+      },
+      {
+        "description": null,
+        "date_code": "20191218",
+        "disabled": false,
+        "definition": {
+          "model": "LCT015",
+          "vendor": "Philips",
+          "description": "Hue white and color ambiance E26/E27",
+          "supports_ota": true,
+          "options": [],
+          "icon": "",
+          "exposes": [
+            {
+              "type": "light",
+              "features": [
+                {
+                  "type": "binary",
+                  "name": "state",
+                  "label": "State",
+                  "property": "state",
+                  "access": 7,
+                  "value_on": "ON",
+                  "value_off": "OFF",
+                  "value_toggle": "TOGGLE",
+                  "description": "On/off state of this light"
+                },
+                {
+                  "type": "numeric",
+                  "name": "brightness",
+                  "label": "Brightness",
+                  "property": "brightness",
+                  "access": 7,
+                  "value_min": 0,
+                  "value_max": 254,
+                  "description": "Brightness of this light"
+                },
+                {
+                  "type": "numeric",
+                  "name": "color_temp",
+                  "label": "Color temp",
+                  "property": "color_temp",
+                  "access": 7,
+                  "unit": "mired",
+                  "value_min": 153,
+                  "value_max": 500,
+                  "description": "Color temperature of this light",
+                  "presets": []
+                },
+                {
+                  "type": "composite",
+                  "name": "color_xy",
+                  "label": "Color (X/Y)",
+                  "property": "color",
+                  "access": 7,
+                  "description": "Color of this light in the CIE 1931 color space (x/y)",
+                  "features": [
+                    {
+                      "type": "numeric",
+                      "name": "x",
+                      "label": "X",
+                      "property": "x",
+                      "access": 7
+                    },
+                    {
+                      "type": "numeric",
+                      "name": "y",
+                      "label": "Y",
+                      "property": "y",
+                      "access": 7
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "numeric",
+              "name": "linkquality",
+              "label": "Linkquality",
+              "property": "linkquality",
+              "access": 1,
+              "unit": "lqi",
+              "value_min": 0,
+              "value_max": 255,
+              "category": "diagnostic"
+            }
+          ]
+        },
+        "endpoints": {
+          "11": {
+            "bindings": [],
+            "configured_reportings": [],
+            "clusters": {
+              "input": [
+                "genBasic",
+                "genOnOff",
+                "genLevelCtrl",
+                "lightingColorCtrl"
+              ],
+              "output": [
+                "genOta"
+              ]
+            },
+            "scenes": []
+          }
+        },
+        "friendly_name": "Kitchen ceiling",
+        "ieee_address": "0x0017880100000001",
+        "interview_completed": true,
+        "interviewing": false,
+        "manufacturer": "Signify Netherlands B.V.",
+        "model_id": "LCT015",
+        "network_address": 1001,
+        "power_source": "Mains (single phase)",
+        "software_build_id": "1.93.11",
+        "supported": true,
+        "type": "Router"
+      },
+      {
+        "description": null,
+        "date_code": "20191218",
+        "disabled": false,
+        "definition": {
+          "model": "LTW010",
+          "vendor": "Philips",
+          "description": "Hue white ambiance E26/E27",
+          "supports_ota": true,
+          "options": [],
+          "icon": "",
+          "exposes": [
+            {
+              "type": "light",
+              "features": [
+                {
+                  "type": "binary",
+                  "name": "state",
+                  "label": "State",
+                  "property": "state",
+                  "access": 7,
+                  "value_on": "ON",
+                  "value_off": "OFF",
+                  "value_toggle": "TOGGLE",
+                  "description": "On/off state of this light"
+                },
+                {
+                  "type": "numeric",
+                  "name": "brightness",
+                  "label": "Brightness",
+                  "property": "brightness",
+                  "access": 7,
+                  "value_min": 0,
+                  "value_max": 254,
+                  "description": "Brightness of this light"
+                },
+                {
+                  "type": "numeric",
+                  "name": "color_temp",
+                  "label": "Color temp",
+                  "property": "color_temp",
+                  "access": 7,
+                  "unit": "mired",
+                  "value_min": 153,
+                  "value_max": 500,
+                  "description": "Color temperature of this light",
+                  "presets": []
+                }
+              ]
+            },
+            {
+              "type": "numeric",
+              "name": "linkquality",
+              "label": "Linkquality",
+              "property": "linkquality",
+              "access": 1,
+              "unit": "lqi",
+              "value_min": 0,
+              "value_max": 255,
+              "category": "diagnostic"
+            }
+          ]
+        },
+        "endpoints": {
+          "11": {
+            "bindings": [],
+            "configured_reportings": [],
+            "clusters": {
+              "input": [
+                "genBasic",
+                "genOnOff",
+                "genLevelCtrl",
+                "lightingColorCtrl"
+              ],
+              "output": [
+                "genOta"
+              ]
+            },
+            "scenes": []
+          }
+        },
+        "friendly_name": "Hall lamp",
+        "ieee_address": "0x0017880100000002",
+        "interview_completed": true,
+        "interviewing": false,
+        "manufacturer": "Signify Netherlands B.V.",
+        "model_id": "LTW010",
+        "network_address": 1002,
+        "power_source": "Mains (single phase)",
+        "software_build_id": "1.93.11",
+        "supported": true,
+        "type": "Router"
+      }
+    ]
+  },
+  {
+    "topic": "bridge/groups",
+    "payload": [
+      {
+        "friendly_name": "Kitchen",
+        "description": null,
+        "id": 1,
+        "members": [
+          {
+            "endpoint": 11,
+            "ieee_address": "0x0017880100000001"
+          },
+          {
+            "endpoint": 11,
+            "ieee_address": "0x0017880100000002"
+          }
+        ],
+        "scenes": [
+          {
+            "id": 0,
+            "name": "Evening"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "topic": "Kitchen ceiling",
+    "payload": {
+      "state": "ON",
+      "brightness": 200,
+      "color_temp": 300,
+      "color_mode": "color_temp",
+      "color": {
+        "x": 0.4596,
+        "y": 0.4105
+      },
+      "linkquality": 120
+    }
+  },
+  {
+    "topic": "Hall lamp",
+    "payload": {
+      "state": "OFF",
+      "brightness": 100,
+      "color_temp": 400,
+      "color_mode": "color_temp",
+      "linkquality": 110
+    }
+  }
+]

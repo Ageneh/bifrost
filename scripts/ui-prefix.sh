@@ -12,6 +12,7 @@
 # Docker Desktop it reaches the host's loopback through host.docker.internal.
 
 set -euo pipefail
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 : "${BIFROST_PROXY_PORT:=9402}"
@@ -41,7 +42,7 @@ write_config "$work"
 
 ui_args=()
 [ "$ui_dir" = embedded ] || ui_args=(--ui-dir "$ui_dir")
-start_bifrost "$bin" "$work" "${ui_args[@]}"
+start_bifrost "$bin" "$work" ${ui_args[@]+"${ui_args[@]}"}
 
 if [ "$(uname -s)" = Linux ]; then
     listen="127.0.0.1:$BIFROST_PROXY_PORT"

@@ -1,0 +1,21 @@
+{
+  "18": {
+    "action": {
+      "alert": "none",
+      "on": false
+    },
+    "class": "Other",
+    "lights": [
+      "9",
+      "14"
+    ],
+    "name": "Kitchen",
+    "recycle": false,
+    "sensors": [],
+    "state": {
+      "all_on": false,
+      "any_on": false
+    },
+    "type": "Room"
+  }
+}
