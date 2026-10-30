@@ -8,7 +8,21 @@ use serde_json::Value;
 use crate::config::{AppConfig, Z2mServer};
 
 /// Keys whose values are secrets, wherever they appear in the document.
-pub const SECRET_KEYS: &[&str] = &["token", "password", "password_hash"];
+///
+/// Settings this version does not know are served back as they are, so the
+/// list also covers the usual names for a secret, not only the typed ones.
+pub const SECRET_KEYS: &[&str] = &[
+    "token",
+    "password",
+    "password_hash",
+    "passwd",
+    "secret",
+    "client_secret",
+    "api_key",
+    "apikey",
+    "access_token",
+    "auth_token",
+];
 
 /// Keys holding a url that may carry a `token=` query parameter.
 pub const URL_KEYS: &[&str] = &["url"];
@@ -161,6 +175,16 @@ mod tests {
     }
 
     #[test]
+    fn unknown_settings_with_secret_names_are_redacted() {
+        let value = json!({"future": {"api_key": "k", "secret": "s", "name": "kept"}});
+
+        assert_eq!(
+            redacted(&value),
+            json!({"future": {"api_key": REDACTED, "secret": REDACTED, "name": "kept"}})
+        );
+    }
+
+    #[test]
     fn unset_secret_stays_null() {
         let value = json!({"token": Value::Null});
         assert_eq!(redacted(&value), value);
@@ -171,6 +195,20 @@ mod tests {
         let value = json!({"url": "ws://host:8080/api?token=s3cret"});
         let expected = json!({"url": format!("ws://host:8080/api?token={REDACTED}")});
         assert_eq!(redacted(&value), expected);
+    }
+
+    #[test]
+    fn url_password_is_redacted_and_round_trips() {
+        let existing = json!({"url": "ws://bifrost:hunter2@10.0.0.1:8080/api"});
+
+        let mut incoming = redacted(&existing);
+        assert_eq!(
+            incoming["url"],
+            format!("ws://bifrost:{REDACTED}@10.0.0.1:8080/api")
+        );
+
+        merge_secrets(&mut incoming, &existing);
+        assert_eq!(incoming, existing);
     }
 
     #[test]

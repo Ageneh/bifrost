@@ -69,7 +69,7 @@ fn default_trusted_cidrs() -> Vec<IpCidr> {
     vec![IpCidr::host(IpAddr::V4(SUPERVISOR_INGRESS_PEER))]
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BridgeConfig {
     pub name: String,
     pub mac: MacAddress,
@@ -87,7 +87,7 @@ pub struct BridgeConfig {
     pub unknown: UnknownSettings,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct BifrostConfig {
     #[serde(default = "default_state_file")]
     pub state_file: Utf8PathBuf,
@@ -253,14 +253,14 @@ impl Debug for AuthConfig {
         f.debug_struct("AuthConfig")
             .field(
                 "password_hash",
-                &self.password_hash.as_ref().map(|_| "<<REDACTED>>"),
+                &self.password_hash.as_ref().map(|_| REDACTED_PLACEHOLDER),
             )
             .field("session_hours", &self.session_hours)
             .field("idle_minutes", &self.idle_minutes)
             .field("trust_ingress", &self.trust_ingress)
             .field("trusted_cidrs", &self.trusted_cidrs)
             .field("allowed_hosts", &self.allowed_hosts)
-            .field("unknown", &self.unknown.keys())
+            .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }
 }
@@ -288,7 +288,7 @@ pub struct Z2mServer {
     pub unknown: UnknownSettings,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Default, Eq, PartialEq)]
 pub struct RoomConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -298,7 +298,7 @@ pub struct RoomConfig {
     pub unknown: UnknownSettings,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bridge: BridgeConfig,
     pub z2m: Z2mConfig,
@@ -316,6 +316,72 @@ const TOKEN_QUERY_KEY: &str = "token";
 /// The token z2m 2.x uses when none is configured.
 const DEFAULT_Z2M_TOKEN: &str = "your-secret-token";
 
+/// What a secret reads as wherever it leaves the process.
+const REDACTED_PLACEHOLDER: &str = "<<REDACTED>>";
+
+/// `Debug` for settings this version does not know: their names only, since
+/// any of their values could be a secret.
+struct SettingNames<'a>(&'a UnknownSettings);
+
+impl Debug for SettingNames<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0.keys()).finish()
+    }
+}
+
+// Debug output ends up in logs, so every settings struct prints unknown
+// settings by name only, and secrets not at all
+
+impl Debug for AppConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("bridge", &self.bridge)
+            .field("z2m", &self.z2m)
+            .field("bifrost", &self.bifrost)
+            .field("rooms", &self.rooms)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for BridgeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BridgeConfig")
+            .field("name", &self.name)
+            .field("mac", &self.mac)
+            .field("ipaddress", &self.ipaddress)
+            .field("http_port", &self.http_port)
+            .field("https_port", &self.https_port)
+            .field("entm_port", &self.entm_port)
+            .field("netmask", &self.netmask)
+            .field("gateway", &self.gateway)
+            .field("timezone", &self.timezone)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for BifrostConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BifrostConfig")
+            .field("state_file", &self.state_file)
+            .field("cert_file", &self.cert_file)
+            .field("auth", &self.auth)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for RoomConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RoomConfig")
+            .field("name", &self.name)
+            .field("icon", &self.icon)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
 impl Debug for Z2mServer {
     // urls and tokens can carry secrets, and Debug output ends up in logs
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -324,8 +390,8 @@ impl Debug for Z2mServer {
             .field("group_prefix", &self.group_prefix)
             .field("disable_tls_verify", &self.disable_tls_verify)
             .field("streaming_fps", &self.streaming_fps)
-            .field("token", &self.token.as_ref().map(|_| "<<REDACTED>>"))
-            .field("unknown", &self.unknown.keys())
+            .field("token", &self.token.as_ref().map(|_| REDACTED_PLACEHOLDER))
+            .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }
 }
@@ -415,24 +481,45 @@ impl Z2mServer {
         url
     }
 
-    /// Replace a non-default `token=` value in `url` with a placeholder.
+    /// Replace a non-default `token=` value and any password in `url` with
+    /// a placeholder. A user name without a password is replaced too: it
+    /// may itself be a token.
     #[must_use]
     #[allow(clippy::option_if_let_else)]
     pub fn sanitize_url(url: &str) -> String {
+        let url = Self::sanitize_userinfo(url);
         match url.find("token=") {
             Some(offset) => {
                 let token = &url[offset + "token=".len()..];
                 if token == DEFAULT_Z2M_TOKEN {
                     // this is the standard "blank" token, it's safe to show
-                    url.to_string()
+                    url
                 } else {
                     // this is an actual secret token, blank it out with a
                     // standard-length placeholder.
-                    format!("{}token={}", &url[..offset], "<<REDACTED>>")
+                    format!("{}token={}", &url[..offset], REDACTED_PLACEHOLDER)
                 }
             }
-            None => url.to_string(),
+            None => url,
         }
+    }
+
+    /// Redact the `user:password@` part of `url`, if it has one.
+    fn sanitize_userinfo(url: &str) -> String {
+        let Some(scheme_end) = url.find("://").map(|offset| offset + "://".len()) else {
+            return url.to_string();
+        };
+        let rest = &url[scheme_end..];
+        let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let Some(at) = rest[..authority_end].rfind('@') else {
+            return url.to_string();
+        };
+
+        let userinfo = match rest[..at].split_once(':') {
+            Some((user, _password)) => format!("{user}:{REDACTED_PLACEHOLDER}"),
+            None => REDACTED_PLACEHOLDER.to_string(),
+        };
+        format!("{}{userinfo}{}", &url[..scheme_end], &rest[at..])
     }
 
     #[must_use]
@@ -451,7 +538,7 @@ impl Client {
 mod tests {
     use std::net::IpAddr;
 
-    use super::{AuthConfig, IpCidr};
+    use super::{AppConfig, AuthConfig, IpCidr, Z2mServer};
 
     fn ip(text: &str) -> IpAddr {
         text.parse().unwrap()
@@ -503,6 +590,56 @@ mod tests {
             serde_json::to_value(&auth).unwrap()["trusted_cidrs"],
             serde_json::json!(["172.30.32.2/32"])
         );
+    }
+
+    #[test]
+    fn sanitize_url_redacts_userinfo_and_tokens() {
+        for (url, expected) in [
+            (
+                "ws://user:hunter2@10.0.0.1:8080/api",
+                "ws://user:<<REDACTED>>@10.0.0.1:8080/api",
+            ),
+            (
+                "wss://hunter2@10.0.0.1/api?token=hunter3",
+                "wss://<<REDACTED>>@10.0.0.1/api?token=<<REDACTED>>",
+            ),
+            (
+                "ws://10.0.0.1/api?token=hunter3",
+                "ws://10.0.0.1/api?token=<<REDACTED>>",
+            ),
+            (
+                "ws://10.0.0.1/api?token=your-secret-token",
+                "ws://10.0.0.1/api?token=your-secret-token",
+            ),
+            // an @ after the authority is not userinfo
+            ("ws://10.0.0.1/a@b", "ws://10.0.0.1/a@b"),
+            ("not a url", "not a url"),
+        ] {
+            assert_eq!(Z2mServer::sanitize_url(url), expected, "{url}");
+        }
+    }
+
+    #[test]
+    fn debug_shows_unknown_settings_by_name_only() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "bridge": {
+                "name": "Bifrost", "mac": "00:11:22:33:44:55", "ipaddress": "10.0.0.2",
+                "netmask": "255.255.255.0", "gateway": "10.0.0.1", "timezone": "UTC",
+                "api_secret": "hunter-bridge"
+            },
+            "z2m": {"s1": {"url": "ws://u:hunter-url@10.0.0.3/api", "extra": "hunter-server"}},
+            "bifrost": {"auth": {"password_hash": "hunter-hash"}, "x": "hunter-bifrost"},
+            "rooms": {"office": {"secret_note": "hunter-room"}},
+            "future": {"password": "hunter-top"}
+        }))
+        .unwrap();
+
+        let debug = format!("{config:?}");
+
+        assert!(!debug.contains("hunter"), "{debug}");
+        for name in ["api_secret", "extra", "secret_note", "future"] {
+            assert!(debug.contains(name), "{name} missing: {debug}");
+        }
     }
 
     #[test]
