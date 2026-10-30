@@ -14,7 +14,6 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 /// Identity of a device: the server it was learned from, and its IEEE
@@ -25,235 +24,12 @@ pub type DeviceKey = (String, String);
 /// missed some. A screen that lags re-reads the snapshot.
 const EVENT_BUFFER: usize = 64;
 
-/// What a device can do, as far as Bifrost can tell from its z2m exposes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct Capabilities {
-    pub dimmable: bool,
-    pub color: bool,
-    pub color_temperature: bool,
-    pub gradient: bool,
-    pub effects: bool,
-    /// The device reports motion.
-    pub motion: bool,
-    /// The device reports temperature.
-    pub temperature: bool,
-    /// The device reports illuminance.
-    pub illuminance: bool,
-    /// The device reports an open/closed contact.
-    pub contact: bool,
-    /// The device sends button events.
-    pub action: bool,
-}
-
-/// The class of a device, derived from its exposes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceType {
-    Light,
-    Plug,
-    Motion,
-    Temperature,
-    Illuminance,
-    Contact,
-    Remote,
-    Other,
-}
-
-impl DeviceType {
-    /// The wire name, for the `type` filter.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Light => "light",
-            Self::Plug => "plug",
-            Self::Motion => "motion",
-            Self::Temperature => "temperature",
-            Self::Illuminance => "illuminance",
-            Self::Contact => "contact",
-            Self::Remote => "remote",
-            Self::Other => "other",
-        }
-    }
-
-    /// The type named by `name`, if it is one.
-    #[must_use]
-    pub fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "light" => Self::Light,
-            "plug" => Self::Plug,
-            "motion" => Self::Motion,
-            "temperature" => Self::Temperature,
-            "illuminance" => Self::Illuminance,
-            "contact" => Self::Contact,
-            "remote" => Self::Remote,
-            "other" => Self::Other,
-            _ => return None,
-        })
-    }
-}
-
-/// Whether a device is reachable, as z2m last reported it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Availability {
-    Online,
-    Offline,
-    /// Nothing has been heard about this device since the server last
-    /// spoke to us; it is neither known to be up nor known to be down.
-    Unknown,
-}
-
-impl Availability {
-    /// The wire name.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Online => "online",
-            Self::Offline => "offline",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-/// One property a device exposes, for the detail view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExposeSummary {
-    /// The z2m property, e.g. `brightness` or `occupancy`.
-    pub property: String,
-    /// The expose type, e.g. `numeric` or `binary`.
-    pub kind: String,
-    /// Whether the property is readable, writable or both.
-    pub access: u8,
-    /// The unit, where z2m names one.
-    pub unit: Option<String>,
-    /// The accepted values of an enum or binary expose.
-    pub values: Vec<String>,
-}
-
-/// A Hue resource this device owns.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResourceRef {
-    pub rid: String,
-    pub rtype: String,
-}
-
-/// The room a device is in, when it is in one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomRef {
-    pub rid: String,
-    pub name: String,
-}
-
-/// The z2m group a device belongs to, when it belongs to one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GroupRef {
-    pub id: u32,
-    pub name: String,
-}
-
-/// Everything Bifrost knows about one device.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceInfo {
-    /// The z2m server the device was learned from.
-    pub server: String,
-    /// The IEEE address, as z2m prints it.
-    pub ieee: String,
-    /// The z2m friendly name, which is the topic prefix.
-    pub friendly_name: String,
-    pub model: Option<String>,
-    pub vendor: Option<String>,
-    pub description: Option<String>,
-    pub device_type: DeviceType,
-    /// True only where Bifrost can serve the device over the Hue API.
-    pub supported: bool,
-    /// Why not, for every unsupported device.
-    pub unsupported_reason: Option<String>,
-    pub exposes: Vec<ExposeSummary>,
-    pub capabilities: Capabilities,
-    pub availability: Availability,
-    /// The Hue resources this device owns.
-    pub resources: Vec<ResourceRef>,
-    pub room: Option<RoomRef>,
-    pub group: Option<GroupRef>,
-    /// When the device last reported anything.
-    pub last_seen: Option<DateTime<Utc>>,
-}
-
-impl DeviceInfo {
-    /// The key this device is stored under.
-    #[must_use]
-    pub fn key(&self) -> DeviceKey {
-        (self.server.clone(), self.ieee.clone())
-    }
-}
-
-/// The join window a server has open, as z2m last reported it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PermitJoinState {
-    /// Seconds z2m said the window lasts; zero once it has closed.
-    pub time: u32,
-    /// The device the window is restricted to, if any.
-    pub device: Option<String>,
-    /// When the window was opened, if it is open.
-    pub opened_at: Option<DateTime<Utc>>,
-}
-
-impl PermitJoinState {
-    /// Whether a join window is open.
-    #[must_use]
-    pub const fn is_open(&self) -> bool {
-        self.time > 0 && self.opened_at.is_some()
-    }
-
-    /// The seconds left in the window, counting down from `opened_at`.
-    #[must_use]
-    pub fn remaining_seconds(&self, now: DateTime<Utc>) -> u32 {
-        if !self.is_open() {
-            return 0;
-        }
-        let elapsed = now.signed_duration_since(self.opened_at.unwrap_or(now));
-        let elapsed = u32::try_from(elapsed.num_seconds().max(0)).unwrap_or(u32::MAX);
-        self.time.saturating_sub(elapsed)
-    }
-}
-
-/// The state of one z2m server, as far as the inventory knows.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServerInfo {
-    pub name: String,
-    /// False once the backend stopped talking to us, whatever the last
-    /// device states were.
-    pub online: bool,
-    pub permit_join: PermitJoinState,
-    pub last_seen: Option<DateTime<Utc>>,
-}
-
-impl ServerInfo {
-    /// A server that has just been configured and not yet connected.
-    #[must_use]
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            online: false,
-            permit_join: PermitJoinState {
-                time: 0,
-                device: None,
-                opened_at: None,
-            },
-            last_seen: None,
-        }
-    }
-}
-
-/// Everything in the inventory, as one value a reader can copy out.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventorySnapshot {
-    pub servers: Vec<ServerInfo>,
-    pub devices: Vec<DeviceInfo>,
-    /// When any part of this changed last.
-    pub updated: DateTime<Utc>,
-}
+/// The wire types the admin API and the websocket carry, defined once in
+/// `bifrost-api` so the UI's bindings are generated from them.
+pub use bifrost_api::inventory::{
+    Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, InventorySnapshot,
+    InventoryUpdate, PermitJoinState, ResourceRef, RoomRef, ServerInfo,
+};
 
 /// A change to the inventory, published to every subscriber.
 #[derive(Debug, Clone)]
@@ -264,6 +40,16 @@ pub enum InventoryEvent {
     Removed { server: String, ieee: String },
     /// A server connected, dropped, or reported a join window.
     Server(Box<ServerInfo>),
+}
+
+impl From<InventoryEvent> for InventoryUpdate {
+    fn from(event: InventoryEvent) -> Self {
+        match event {
+            InventoryEvent::Device(device) => Self::Device(device),
+            InventoryEvent::Removed { server, ieee } => Self::Removed { server, ieee },
+            InventoryEvent::Server(server) => Self::Server(server),
+        }
+    }
 }
 
 #[derive(Debug)]

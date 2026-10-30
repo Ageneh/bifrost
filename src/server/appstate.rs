@@ -10,6 +10,7 @@ use hue::legacy_api::{ApiConfig, ApiShortConfig, Whitelist};
 use svc::manager::SvmClient;
 
 use crate::auth::{Auth, HashCost, SystemClock};
+use crate::backend::z2m::BackendCommands;
 use crate::config::AppConfig;
 use crate::config_store::ConfigStore;
 use crate::error::ApiResult;
@@ -27,6 +28,7 @@ pub struct AppState {
     auth: Arc<Auth>,
     pub res: Arc<Mutex<Resources>>,
     inventory: Arc<Inventory>,
+    backends: Arc<BackendCommands>,
 }
 
 impl AppState {
@@ -92,6 +94,7 @@ impl AppState {
             auth,
             res,
             inventory: Inventory::new(),
+            backends: Arc::new(BackendCommands::default()),
         })
     }
 
@@ -99,6 +102,12 @@ impl AppState {
     #[must_use]
     pub fn inventory(&self) -> Arc<Inventory> {
         self.inventory.clone()
+    }
+
+    /// The command channels of the running z2m backends.
+    #[must_use]
+    pub fn backends(&self) -> Arc<BackendCommands> {
+        self.backends.clone()
     }
 
     /// Replace the authentication state, e.g. with one on a test clock.

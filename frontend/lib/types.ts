@@ -7,6 +7,7 @@
  * actually reads.
  */
 import type { AppConfig } from './generated/AppConfig'
+import type { InventoryUpdate } from './generated/InventoryUpdate'
 import type { Service } from './generated/Service'
 
 /**
@@ -33,6 +34,7 @@ export type Update
   = | { AppConfig: AppConfig }
     | { HueEvent: HueEventBlock }
     | { ServiceUpdate: Service }
+    | { Inventory: InventoryUpdate }
 
 /**
  * One path of a draft conflict, resolved by the user.
