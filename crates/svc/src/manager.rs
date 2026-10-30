@@ -399,8 +399,13 @@ impl ServiceManager {
 
         // if the service is known, attempt to start it
         if let Ok(svc) = self.get(&id) {
-            log::debug!("Starting service: {id} {}", &svc.name);
-            svc.tx.send(ServiceState::Running)?;
+            // a repeated start must not wake the service: its run loop
+            // cancels the running future on any change, and a service that
+            // moves its work into that future (an HTTP server) loses it
+            if *svc.tx.borrow() != ServiceState::Running {
+                log::debug!("Starting service: {id} {}", &svc.name);
+                svc.tx.send(ServiceState::Running)?;
+            }
             return self.resolve(&id);
         }
 
@@ -644,7 +649,7 @@ mod tests {
     use crate::error::{SvcError, SvcResult};
     use crate::manager::{ServiceManager, SvmClient};
     use crate::serviceid::{ServiceId, ServiceName};
-    use crate::traits::{BoxDynService, Service};
+    use crate::traits::{BoxDynService, Service, ServiceState};
 
     /// A service that runs until it is stopped or aborted.
     struct Idle;
@@ -702,6 +707,47 @@ mod tests {
         assert_ne!(first, second);
         client.start("idle").await?;
         client.wait_for_start("idle").await?;
+
+        Ok(())
+    }
+
+    /// A service that, like an HTTP server, moves its work into `run` and
+    /// completes at once when `run` is entered again without a new `start`.
+    struct TakesWork {
+        work: Option<()>,
+    }
+
+    #[async_trait::async_trait]
+    impl Service for TakesWork {
+        type Error = Infallible;
+
+        async fn start(&mut self) -> Result<(), Infallible> {
+            self.work = Some(());
+            Ok(())
+        }
+
+        async fn run(&mut self) -> Result<(), Infallible> {
+            if self.work.take().is_some() {
+                futures::future::pending::<()>().await;
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn repeated_start_keeps_service_running() -> SvcResult<()> {
+        let (mut client, _future) = ServiceManager::spawn();
+
+        client
+            .register_service("server", TakesWork { work: None })
+            .await?;
+        client.start("server").await?;
+        client.wait_for_start("server").await?;
+
+        client.start("server").await?;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        assert_eq!(client.status("server").await?, ServiceState::Running);
 
         Ok(())
     }
