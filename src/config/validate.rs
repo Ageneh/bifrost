@@ -16,7 +16,7 @@ pub use bifrost_api::admin::{Severity, ValidationError};
 use crate::config::AppConfig;
 
 const WEBSOCKET_SCHEMES: &[&str] = &["ws", "wss"];
-const KNOWN_ROOM_KEYS: &[&str] = &["name", "icon"];
+const KNOWN_ROOM_KEYS: &[&str] = &["name", "icon", "devices"];
 const KNOWN_DEVICE_KEYS: &[&str] = &["enabled", "name", "room"];
 const IP_FIELDS: &[&str] = &["ipaddress", "netmask", "gateway"];
 const PORT_FIELDS: &[&str] = &["http_port", "https_port", "entm_port"];

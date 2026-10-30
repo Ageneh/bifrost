@@ -138,6 +138,33 @@ function filteredDevices(search) {
     .filter(entry => supported === null || String(entry.supported) === supported)
 }
 
+/** The rooms the bridge holds, as the admin API reports them. */
+const ROOMS = [
+  {
+    id: 'room-kitchen',
+    topic: 'Kitchen',
+    name: 'Kitchen',
+    icon: 'kitchen',
+    devices: [
+      { ieee: '0x0017880100000001', name: 'Kitchen ceiling', supported: true },
+    ],
+    scenes: [
+      { id: 'scene-bright', name: 'Bright', active: true },
+      { id: 'scene-relax', name: 'Relax', active: false },
+    ],
+  },
+  {
+    id: 'room-hall',
+    topic: 'Hall',
+    name: 'Hall',
+    icon: 'hallway',
+    devices: [
+      { ieee: '0x0017880100000002', name: 'Hall lamp', supported: true },
+    ],
+    scenes: [],
+  },
+]
+
 const SERVICES = {
   services: {
     '11111111-1111-4111-8111-111111111111': {
@@ -348,6 +375,22 @@ async function handleApi(request, response, endpoint, search) {
     return sendJson(response, ACTIVE_CONFIG)
   }
 
+  if (endpoint === 'rooms' && method === 'GET') {
+    return sendJson(response, { rooms: ROOMS })
+  }
+
+  const recall = endpoint.match(/^rooms\/([^/]+)\/scenes\/([^/]+)\/recall$/)
+  if (recall && method === 'POST') {
+    const room = ROOMS.find(entry => entry.id === decodeURIComponent(recall[1]))
+    if (!room) {
+      return send(response, 404, JSON.stringify({ error: 'No such room', errors: [] }))
+    }
+    for (const scene of room.scenes) {
+      scene.active = scene.id === decodeURIComponent(recall[2])
+    }
+    return send(response, 200, JSON.stringify(null))
+  }
+
   if (endpoint === 'service' && method === 'GET') {
     return sendJson(response, SERVICES)
   }
@@ -414,6 +457,19 @@ const server = createServer(async (request, response) => {
   }
 
   const rest = path.slice(prefix.length).replace(/^\/+/, '')
+
+  // the fixture state is one process, so each test starts from the same
+  // draft rather than from whatever the previous test left behind
+  if (rest === '__reset' && request.method === 'POST') {
+    draft.config = initialDraftConfig()
+    draft.revision = 3
+    for (const room of ROOMS) {
+      room.scenes.forEach((scene, index) => {
+        scene.active = index === 0
+      })
+    }
+    return send(response, 204, '')
+  }
 
   if (rest.startsWith('bifrost/')) {
     const endpoint = rest.slice('bifrost/'.length).replace(/\/+$/, '')

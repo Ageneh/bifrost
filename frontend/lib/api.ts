@@ -21,6 +21,7 @@ import type { PermitJoinRequest } from './generated/PermitJoinRequest'
 import type { PermitJoinResponse } from './generated/PermitJoinResponse'
 import type { RestartRequest } from './generated/RestartRequest'
 import type { RevisionRequest } from './generated/RevisionRequest'
+import type { RoomList } from './generated/RoomList'
 import type { ServiceList } from './generated/ServiceList'
 import type { ServiceState } from './generated/ServiceState'
 import type { SessionResponse } from './generated/SessionResponse'
@@ -248,6 +249,21 @@ export class ApiClient {
   /** Seconds left in a server's join window; zero when none is open. */
   permitJoinStatus(server: string): Promise<PermitJoinResponse> {
     return this.request(`z2m/${encodeURIComponent(server)}/permit_join`)
+  }
+
+  // ---- rooms -----------------------------------------------------------
+
+  /** Every room, with the devices in it and the scenes it holds. */
+  rooms(): Promise<RoomList> {
+    return this.request('rooms')
+  }
+
+  /** Recall one of a room's scenes. */
+  recallScene(room: string, scene: string, duration?: number): Promise<void> {
+    return this.request(
+      `rooms/${encodeURIComponent(room)}/scenes/${encodeURIComponent(scene)}/recall`,
+      { method: 'POST', body: { duration: duration ?? null }, csrf: true },
+    )
   }
 
   // ---- services --------------------------------------------------------

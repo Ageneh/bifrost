@@ -1,4 +1,10 @@
 import { expect, test } from '@playwright/test'
+
+// every spec shares one fixture server, so each test starts from the same
+// draft instead of whatever the previous one left behind
+test.beforeEach(async ({ request }) => {
+  await request.post('__reset')
+})
 import type { Page } from '@playwright/test'
 
 /**
@@ -41,11 +47,12 @@ test.describe('system · bridge and network', () => {
     await expect(page.getByTestId('config-field-bridge-http-port-blast')).toHaveText('· restart')
     await expect(page.getByTestId('config-field-bridge-mac-blast')).toHaveText('· restart required')
 
-    // System is a live mode now, and Devices has had its screen since wave 4;
-    // the modes still without one say so
+    // System is a live mode now; Devices and Rooms have had their screens
+    // since waves 4 and 5, and the modes still without one say so
     await expect(page.getByTestId('nav-system')).toHaveAttribute('data-state', 'active')
     await expect(page.getByTestId('nav-devices')).toHaveAttribute('data-state', 'idle')
-    await expect(page.getByTestId('nav-rooms')).toHaveAttribute('data-state', 'pending')
+    await expect(page.getByTestId('nav-rooms')).toHaveAttribute('data-state', 'idle')
+    await expect(page.getByTestId('nav-entertainment')).toHaveAttribute('data-state', 'pending')
 
     // the tab set keeps the screens this wave does not build visible, disabled
     await expect(page.getByTestId('system-tabs')).toBeVisible()

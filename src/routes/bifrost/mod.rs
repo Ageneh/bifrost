@@ -3,6 +3,7 @@ pub mod certificate;
 pub mod config;
 pub mod devices;
 pub mod logs;
+pub mod rooms;
 pub mod service;
 pub mod setup;
 pub mod state;
@@ -324,6 +325,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/z2m", z2m::router())
         .nest("/config", config::router())
         .nest("/logs", logs::router())
+        .nest("/rooms", rooms::router())
         .nest("/state", state::router())
         .route("/ws", any(websocket))
         .fallback(not_found)

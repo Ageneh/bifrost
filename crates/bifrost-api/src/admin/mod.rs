@@ -3,11 +3,13 @@
 pub mod auth;
 pub mod certificate;
 pub mod logs;
+pub mod rooms;
 pub mod state;
 pub mod z2m;
 
 pub use certificate::CertificateInfo;
 pub use logs::{LogList, LogRecord};
+pub use rooms::{RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest};
 pub use state::{StateCounts, StateResetRequest, StateSummary};
 pub use z2m::{Z2mServerEntry, Z2mServerList, Z2mServerWrite};
 
@@ -178,6 +180,21 @@ pub struct ApplyResponse {
     pub revision: u64,
     pub plan: ApplyPlan,
     pub changes: Vec<ConfigChange>,
+    /// Work that the apply could not carry out, named by the setting it
+    /// belongs to. An apply that reports nothing here changed everything it
+    /// was asked to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<ApplyFailure>,
+}
+
+/// One part of an apply that did not reach the mesh.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ApplyFailure {
+    /// The configuration path, e.g. `rooms.Kitchen`.
+    pub path: String,
+    /// What went wrong, in the words the screen shows.
+    pub reason: String,
 }
 
 /// Error body of every configuration admin endpoint.

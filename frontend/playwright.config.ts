@@ -5,12 +5,18 @@ import { defineConfig, devices } from '@playwright/test'
  * phone the console is expected on, behind an ingress prefix like the one
  * Home Assistant serves it under.
  */
-const PORT = 4319
+// the port is overridable so two checkouts on one machine do not share a
+// server: `reuseExistingServer` would otherwise run the tests against
+// whichever build happened to listen first
+const PORT = Number(process.env.BIFROST_E2E_PORT ?? 4319)
 const PREFIX = '/api/hassio_ingress/test'
 
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  // one worker: every spec file talks to the same in-memory fixture server,
+  // so two files writing the draft at once race on its revision
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',

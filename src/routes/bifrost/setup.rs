@@ -434,6 +434,7 @@ async fn post_apply(
         revision: slot.revision,
         plan: bifrost_api::admin::ApplyPlan::default(),
         changes: vec![],
+        failed: vec![],
     }))
 }
 

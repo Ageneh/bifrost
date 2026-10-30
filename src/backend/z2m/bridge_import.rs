@@ -232,13 +232,29 @@ impl Z2mBackend {
         let link_room = RType::Room.deterministic(&grp.friendly_name);
         let link_glight = RType::GroupedLight.deterministic((link_room.rid, grp.id));
 
-        let children = grp
-            .members
-            .iter()
-            .map(|f| RType::Device.deterministic(&f.ieee_address))
-            .collect();
-
         let topic = grp.friendly_name.to_string();
+
+        // the live configuration, so room changes apply without a restart
+        let room_conf = self.store.active().rooms.get(&topic).cloned();
+
+        // a drafted membership replaces what the group holds; absent, the
+        // group is the membership
+        let drafted = room_conf.as_ref().and_then(|room| room.devices.as_ref());
+        let children = drafted.map_or_else(
+            || {
+                grp.members
+                    .iter()
+                    .map(|f| RType::Device.deterministic(&f.ieee_address))
+                    .collect()
+            },
+            |devices| {
+                devices
+                    .iter()
+                    .filter_map(|ieee| ieee.parse::<z2m::api::IeeeAddress>().ok())
+                    .map(|ieee| RType::Device.deterministic(&ieee))
+                    .collect()
+            },
+        );
 
         let mut res = self.state.lock().await;
 
@@ -313,8 +329,7 @@ impl Z2mBackend {
         }
 
         let mut metadata = RoomMetadata::new(RoomArchetype::Home, room_name);
-        // read the live configuration, so room changes apply without a restart
-        if let Some(room_conf) = self.store.active().rooms.get(&topic) {
+        if let Some(room_conf) = &room_conf {
             if let Some(name) = &room_conf.name {
                 metadata.name = name.to_string();
             }
@@ -339,6 +354,9 @@ impl Z2mBackend {
             })?;
         }
 
+        // the admin API names a room by its group topic, which is the key
+        // `rooms:` uses
+        res.aux_set(&link_room, AuxData::new().with_topic(&topic));
         res.add(&link_room, Resource::Room(room))?;
 
         let glight = GroupedLight::new(link_room);

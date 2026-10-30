@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+// every spec shares one fixture server, so each test starts from the same
+// draft instead of whatever the previous one left behind
+test.beforeEach(async ({ request }) => {
+  await request.post('__reset')
+})
+
 /**
  * Wave 2's acceptance case: the shell, the six nav items, the draft pill and
  * the card-collapsed table, at 390 px behind an ingress prefix.
@@ -43,13 +49,17 @@ test.describe('the console shell at 390 px', () => {
     }
 
     // a lazy route chunk loads through the relative asset base; Devices has
-    // its own screen since wave 4, and the modes after it still say pending
+    // had its screen since wave 4 and Rooms since wave 5, and the modes
+    // after them still say pending
     await page.getByTestId('nav-devices').click()
     await expect(page.getByTestId('device-table')).toBeVisible()
 
     await page.getByTestId('nav-rooms').click()
+    await expect(page.getByTestId('rooms-list')).toBeVisible()
+
+    await page.getByTestId('nav-entertainment').click()
     await expect(page.getByTestId('pending-screen')).toBeVisible()
-    await expect(page.getByTestId('pending-screen')).toContainText('Rooms')
+    await expect(page.getByTestId('pending-screen')).toContainText('Entertainment')
   })
 
   test('shows the draft pill and hides the status-column bar', async ({ page }) => {

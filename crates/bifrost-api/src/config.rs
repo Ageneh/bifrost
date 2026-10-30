@@ -313,6 +313,11 @@ pub struct RoomConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub icon: Option<RoomArchetype>,
+    /// The devices in this room, by IEEE address. Absent means the z2m
+    /// group decides; present means this list is the room, and apply sends
+    /// the difference to the group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<String>>,
     #[serde(flatten)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
@@ -430,6 +435,7 @@ impl Debug for RoomConfig {
         f.debug_struct("RoomConfig")
             .field("name", &self.name)
             .field("icon", &self.icon)
+            .field("devices", &self.devices)
             .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }
