@@ -54,6 +54,80 @@ pub fn redacted(value: &Value) -> Value {
     copy
 }
 
+/// Resolve write-only secrets in an incoming document against `existing`.
+///
+/// An absent, `null` or [`REDACTED`] secret keeps the existing value; `""`
+/// clears it. A url that comes back exactly as it was handed out (with its
+/// token redacted) keeps the existing url.
+pub fn merge_secrets(incoming: &mut Value, existing: &Value) {
+    keep_existing(incoming, existing);
+    clear_secrets(incoming);
+}
+
+fn keep_existing(incoming: &mut Value, existing: &Value) {
+    let (Value::Object(incoming), Value::Object(existing)) = (incoming, existing) else {
+        return;
+    };
+
+    for (key, old) in existing {
+        if is_secret_key(key) {
+            let keep = match incoming.get(key) {
+                None | Some(Value::Null) => true,
+                Some(Value::String(text)) => text == REDACTED,
+                Some(_) => false,
+            };
+            if keep && !old.is_null() {
+                incoming.insert(key.clone(), old.clone());
+            }
+        } else if URL_KEYS.contains(&key.as_str()) {
+            if let (Some(Value::String(new)), Value::String(old)) = (incoming.get_mut(key), old) {
+                if *new != *old && *new == Z2mServer::sanitize_url(old) {
+                    new.clone_from(old);
+                }
+            }
+        } else if let Some(child) = incoming.get_mut(key) {
+            keep_existing(child, old);
+        }
+    }
+}
+
+/// Drop secrets set to `""` (cleared), and placeholders with nothing to keep.
+fn clear_secrets(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.retain(|key, child| {
+                !(is_secret_key(key) && matches!(child.as_str(), Some("" | REDACTED)))
+            });
+            map.values_mut().for_each(clear_secrets);
+        }
+        Value::Array(items) => items.iter_mut().for_each(clear_secrets),
+        _ => {}
+    }
+}
+
+/// Apply a JSON merge patch (RFC 7386) to `target`.
+pub fn merge_patch(target: &mut Value, patch: &Value) {
+    let Value::Object(patch) = patch else {
+        *target = patch.clone();
+        return;
+    };
+
+    if !target.is_object() {
+        *target = Value::Object(serde_json::Map::new());
+    }
+    let Value::Object(map) = target else {
+        return;
+    };
+
+    for (key, value) in patch {
+        if value.is_null() {
+            map.remove(key);
+        } else {
+            merge_patch(map.entry(key.clone()).or_insert(Value::Null), value);
+        }
+    }
+}
+
 /// `config` as a redacted document, safe to hand out.
 pub fn redacted_config(config: &AppConfig) -> serde_json::Result<Value> {
     let mut value = serde_json::to_value(config)?;
@@ -70,7 +144,7 @@ pub fn redacted_app_config(config: &AppConfig) -> serde_json::Result<AppConfig> 
 mod tests {
     use serde_json::{Value, json};
 
-    use crate::config::redact::{REDACTED, redacted};
+    use crate::config::redact::{REDACTED, merge_patch, merge_secrets, redacted};
 
     #[test]
     fn secret_keys_are_redacted_at_any_depth() {
@@ -109,5 +183,81 @@ mod tests {
     fn other_values_are_untouched() {
         let value = json!({"bridge": {"name": "Bifrost", "http_port": 80}});
         assert_eq!(redacted(&value), value);
+    }
+
+    fn existing() -> Value {
+        json!({
+            "z2m": {
+                "one": {"url": "ws://host/api?token=old-url-token", "token": "old"},
+            },
+            "auth": {"password_hash": "$argon2id$old"},
+        })
+    }
+
+    #[test]
+    fn absent_or_null_secret_keeps_existing() {
+        let mut incoming =
+            json!({"z2m": {"one": {"url": "ws://host/api"}}, "auth": {"password_hash": null}});
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming["z2m"]["one"]["token"], "old");
+        assert_eq!(incoming["auth"]["password_hash"], "$argon2id$old");
+    }
+
+    #[test]
+    fn redacted_document_round_trips_to_existing() {
+        let mut incoming = redacted(&existing());
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming, existing());
+    }
+
+    #[test]
+    fn empty_secret_clears() {
+        let mut incoming = json!({"z2m": {"one": {"url": "ws://host/api", "token": ""}}});
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming, json!({"z2m": {"one": {"url": "ws://host/api"}}}));
+    }
+
+    #[test]
+    fn new_secret_replaces_existing() {
+        let mut incoming = json!({"z2m": {"one": {"url": "ws://host/api", "token": "new"}}});
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming["z2m"]["one"]["token"], "new");
+    }
+
+    #[test]
+    fn placeholder_without_existing_value_is_dropped() {
+        let mut incoming = json!({"z2m": {"two": {"url": "ws://x", "token": REDACTED}}});
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming, json!({"z2m": {"two": {"url": "ws://x"}}}));
+    }
+
+    #[test]
+    fn changed_url_is_kept() {
+        let mut incoming = json!({"z2m": {"one": {"url": "ws://other/api?token=new"}}});
+        merge_secrets(&mut incoming, &existing());
+
+        assert_eq!(incoming["z2m"]["one"]["url"], "ws://other/api?token=new");
+    }
+
+    #[test]
+    fn merge_patch_follows_rfc_7386() {
+        let mut target = json!({"a": "b", "c": {"d": "e", "f": "g"}});
+        merge_patch(&mut target, &json!({"a": "z", "c": {"f": null}, "h": [1]}));
+
+        assert_eq!(target, json!({"a": "z", "c": {"d": "e"}, "h": [1]}));
+    }
+
+    #[test]
+    fn merge_patch_null_secret_keeps_existing() {
+        let mut target = existing();
+        merge_patch(&mut target, &json!({"z2m": {"one": {"token": null}}}));
+        merge_secrets(&mut target, &existing());
+
+        assert_eq!(target, existing());
     }
 }

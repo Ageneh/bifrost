@@ -89,3 +89,76 @@ pub struct ApplyPlan {
     pub hot: Vec<ApplyAction>,
     pub restart_required: Vec<Reason>,
 }
+
+/// State of the draft, returned by every draft read and write.
+///
+/// `config` is redacted: a secret that is set reads as `"<<REDACTED>>"`.
+/// Secrets are write-only; on write, an absent, `null` or redacted secret
+/// keeps the existing value and `""` clears it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DraftResponse {
+    /// Revision the next write must name.
+    pub revision: u64,
+    /// RFC 3339 time of the last draft write, `None` without a draft.
+    pub updated_at: Option<String>,
+    /// The draft configuration, `None` without a draft.
+    pub config: Option<serde_json::Value>,
+    /// Findings for the draft.
+    pub validation: Vec<ValidationError>,
+}
+
+/// Replace the draft.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DraftWrite {
+    pub revision: u64,
+    pub config: serde_json::Value,
+}
+
+/// Change the draft (or, without one, the active configuration) with a
+/// JSON merge patch (RFC 7386).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DraftPatch {
+    pub revision: u64,
+    pub patch: serde_json::Value,
+}
+
+/// Replace the draft with an exported YAML document.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfigImport {
+    pub revision: u64,
+    pub yaml: String,
+}
+
+/// A request that only names the revision it was based on.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevisionRequest {
+    pub revision: u64,
+}
+
+/// Restart Bifrost, applying the draft first when one exists (which then
+/// requires `revision`).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RestartRequest {
+    pub revision: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevisionResponse {
+    pub revision: u64,
+}
+
+/// Result of applying the draft.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApplyResponse {
+    pub revision: u64,
+    pub plan: ApplyPlan,
+    pub changes: Vec<ConfigChange>,
+}
+
+/// Error body of every configuration admin endpoint.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ErrorResponse {
+    pub error: String,
+    /// Validation findings, when the request was refused because of them.
+    pub errors: Vec<ValidationError>,
+}

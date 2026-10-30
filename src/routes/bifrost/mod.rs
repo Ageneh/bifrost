@@ -1,18 +1,17 @@
 pub mod backend;
+pub mod config;
 pub mod service;
 pub mod websocket;
 
 use std::error::Error;
 
 use axum::Router;
-use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::any;
 use hyper::StatusCode;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::json;
 
-use crate::config::redact::redacted_config;
 use crate::routes::bifrost::websocket::websocket;
 use crate::routes::extractor::Json;
 use crate::server::appstate::AppState;
@@ -44,14 +43,10 @@ impl IntoResponse for BifrostApiError {
     }
 }
 
-async fn get_config(State(state): State<AppState>) -> BifrostApiResult<Json<Value>> {
-    Ok(Json(redacted_config(&state.config())?))
-}
-
 pub fn router() -> Router<AppState> {
     Router::new()
         .nest("/service", service::router())
         .nest("/backend", backend::router())
-        .route("/config", get(get_config))
+        .nest("/config", config::router())
         .route("/ws", any(websocket))
 }
