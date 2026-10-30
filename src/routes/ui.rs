@@ -75,6 +75,11 @@ impl UiSource<'_> {
     }
 
     fn get(self, path: &str) -> Option<Cow<'static, [u8]>> {
+        // debug builds of rust-embed read from disk too, so both sources
+        // need the check
+        if !is_plain_relative(path) {
+            return None;
+        }
         match self {
             #[cfg(feature = "ui")]
             Self::Embedded => {
@@ -82,12 +87,7 @@ impl UiSource<'_> {
             }
             #[cfg(not(feature = "ui"))]
             Self::Embedded => None,
-            Self::Directory(dir) => {
-                if !is_plain_relative(path) {
-                    return None;
-                }
-                std::fs::read(dir.join(path)).ok().map(Cow::Owned)
-            }
+            Self::Directory(dir) => std::fs::read(dir.join(path)).ok().map(Cow::Owned),
         }
     }
 }
