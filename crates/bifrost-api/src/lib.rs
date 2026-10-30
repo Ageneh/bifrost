@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod backend;
 pub mod config;
+pub mod entertainment;
 pub mod error;
 pub mod inventory;
 pub mod service;

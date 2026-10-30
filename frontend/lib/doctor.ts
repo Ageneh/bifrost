@@ -75,6 +75,11 @@ export interface DoctorInput {
   readError: string | null
   /** Why the last draft call failed. */
   draftError: string | null
+  /**
+   * How many areas are streaming and how many may, when the page has read
+   * the stream status. Absent until the first poll answers.
+   */
+  streams?: { active: number, max: number }
 }
 
 const Z2M_PREFIX = 'z2m@'
@@ -283,6 +288,16 @@ export function deriveHealth(input: DoctorInput): HealthItem[] {
           ? 'crit'
           : 'ok'
 
+  const streams = input.streams
+  const streamsState: HealthItem['state'] | null
+    = streams === undefined
+      ? null
+      : streams.max > 0 && streams.active > streams.max
+        ? 'crit'
+        : streams.active > 0
+          ? 'ok'
+          : 'idle'
+
   return [
     {
       id: 'bridge',
@@ -296,6 +311,16 @@ export function deriveHealth(input: DoctorInput): HealthItem[] {
       value: `${running} of ${total} running`,
       state: servicesState,
     },
+    // the streams row counts areas, which is what the owner watches: two
+    // rows here mean the TV and the second client are both streaming
+    ...(streams === undefined || streamsState === null
+      ? []
+      : [{
+          id: 'streams',
+          label: 'Streams',
+          value: `${streams.active} of ${streams.max} streaming`,
+          state: streamsState,
+        }]),
     {
       id: 'z2m',
       label: 'zigbee2mqtt',

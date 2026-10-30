@@ -7,9 +7,9 @@
  * three quick actions, and the draft last. Every row names its cause and
  * opens the fix. A healthy bridge is one row that says so.
  *
- * Every fact comes from the API or the live socket. Sources that this wave
- * does not have yet — link button, pairing, streams — contribute no row
- * rather than a placeholder.
+ * Every fact comes from the API or the live socket. The streams panel is the
+ * one place that polls: the socket only says when a stream started or ended,
+ * and the rates are measured over the second between two polls.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AsyncState from '~/components/AsyncState.vue'
@@ -20,8 +20,10 @@ import { useApi } from '~/composables/useApi'
 import { useDraft } from '~/composables/useDraft'
 import { useInventory } from '~/composables/useInventory'
 import { useLiveSocket } from '~/composables/useLiveSocket'
+import { useStreams } from '~/composables/useStreams'
 import { useToast } from '~/composables/useToast'
 import type { AppConfig } from '~/lib/generated/AppConfig'
+import type { EntertainmentCapabilities } from '~/lib/generated/EntertainmentCapabilities'
 import type { Service } from '~/lib/generated/Service'
 import type { AttentionItem, DoctorEvent } from '~/lib/doctor'
 import { deriveAttention, deriveHealth } from '~/lib/doctor'
@@ -30,9 +32,12 @@ const { client } = useApi()
 const socket = useLiveSocket()
 const draft = useDraft()
 const inventory = useInventory()
+const streams = useStreams()
 const toast = useToast()
 
 const config = ref<AppConfig | null>(null)
+/** The zones, so a stream row can name the area it streams. */
+const capabilities = ref<EntertainmentCapabilities | null>(null)
 const services = ref<Service[]>([])
 const loading = ref(true)
 const failure = ref<string | null>(null)
@@ -62,6 +67,23 @@ function noteRecovery(previous: Map<string, string>, next: Service[]): void {
   }
 }
 
+/** The name of the area a stream belongs to. */
+function areaName(area: string): string {
+  const known = capabilities.value?.configurations.find(zone => zone.id === area)
+  return known?.name ?? 'An unknown area'
+}
+
+/** One row per running stream; two rows are the point of this wave. */
+const streamRows = computed(() => streams.streams().map(stream => ({
+  id: stream.area,
+  name: areaName(stream.area),
+  in: stream.fps_in,
+  out: stream.fps_out,
+  frames: stream.frames,
+  drops: stream.drops,
+  error: stream.last_error,
+})))
+
 const doctorInput = computed(() => ({
   config: config.value,
   services: services.value,
@@ -73,6 +95,12 @@ const doctorInput = computed(() => ({
   applied: applied.value,
   readError: failure.value,
   draftError: draft.error.value,
+  streams: streams.status.value === null
+    ? undefined
+    : {
+        active: streams.streams().length,
+        max: streams.status.value.max_streams,
+      },
 }))
 
 const attention = computed(() => deriveAttention(doctorInput.value))
@@ -172,15 +200,27 @@ onMounted(async () => {
     else if ('ServiceUpdate' in update) {
       applyUpdate(update.ServiceUpdate)
     }
+    else if ('EntertainmentStatus' in update) {
+      // the set of streams changed; the rates still come from the poll
+      void streams.start()
+    }
   })
+  streams.start()
   await load()
   await draft.load()
   await inventory.refresh()
+  try {
+    capabilities.value = await client.entertainmentCapabilities()
+  }
+  catch {
+    // the stream rows fall back to the area id rather than hiding
+  }
 })
 
 onBeforeUnmount(() => {
   stopUpdates?.()
   stopUpdates = null
+  streams.stop()
 })
 
 // an apply that succeeded is the clearest thing the doctor can report
@@ -192,6 +232,16 @@ watch(
     }
   },
 )
+
+async function stopStream(area: string): Promise<void> {
+  try {
+    await streams.stopStream(area)
+    toast.ok('Stream stopped.')
+  }
+  catch (cause) {
+    toast.fail(cause instanceof Error ? cause.message : 'The stream did not stop.')
+  }
+}
 
 function openDraft(): void {
   drawerOpen.value = true
@@ -344,6 +394,64 @@ function runAction(item: AttentionItem): void {
         :items="health"
         testid="home-health"
       />
+
+      <div
+        v-if="streamRows.length > 0"
+        class="fd-panel"
+        data-testid="home-streams"
+      >
+        <div class="fd-panel__head">
+          <div>
+            <div class="fd-panel__title">
+              Streaming
+            </div>
+            <div class="fd-panel__sub">
+              One row per area. The TV or the app starts a stream; this stops one.
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="fd-stack"
+          data-testid="home-stream-list"
+        >
+          <div
+            v-for="stream in streamRows"
+            :key="stream.id"
+            class="fd-between"
+            :data-testid="`home-stream-${stream.id}`"
+          >
+            <div>
+              <div class="fd-value">
+                {{ stream.name }}
+              </div>
+              <div class="fd-meta">
+                <span
+                  class="fd-num"
+                  :data-testid="`home-stream-${stream.id}-fps`"
+                >{{ stream.in }} in / {{ stream.out }} out fps</span>
+                · <span class="fd-num">{{ stream.frames }} frames</span>
+                · <span class="fd-num">{{ stream.drops }} dropped</span>
+              </div>
+              <div
+                v-if="stream.error"
+                class="fd-meta"
+                data-state="crit"
+              >
+                {{ stream.error }}
+              </div>
+            </div>
+            <button
+              type="button"
+              class="fd-btn fd-btn--ghost fd-btn--sm"
+              :data-testid="`home-stream-${stream.id}-stop`"
+              @click="stopStream(stream.id)"
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div
         class="fd-panel"

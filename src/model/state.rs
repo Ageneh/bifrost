@@ -157,6 +157,44 @@ impl State {
         }
     }
 
+    /// Write the configured stream limit into the bridge's entertainment
+    /// resource.
+    ///
+    /// The resource is persisted with the state, so the value it was created
+    /// with outlives the setting. Clients read it to decide how many streams
+    /// they may open, which means the state has to follow the configuration
+    /// rather than the other way around.
+    pub fn patch_max_streams(&mut self, max_streams: u32) -> ApiResult<()> {
+        let mut patched = 0;
+
+        for value in self.res.values_mut() {
+            let Resource::Entertainment(ent) = value else {
+                continue;
+            };
+
+            // per-device entertainment services leave the field unset; only
+            // the bridge's own proxy advertises a limit
+            if ent.max_streams.is_none() {
+                continue;
+            }
+
+            if ent.max_streams != Some(max_streams) {
+                log::info!(
+                    "Advertising {max_streams} entertainment streams instead of {:?}",
+                    ent.max_streams
+                );
+                ent.max_streams = Some(max_streams);
+            }
+            patched += 1;
+        }
+
+        if patched == 0 {
+            log::warn!("No bridge entertainment resource to carry max_streams");
+        }
+
+        Ok(())
+    }
+
     pub fn from_v0(state: Value) -> ApiResult<Self> {
         let (v0res, v0aux): (serde_yml::Mapping, serde_yml::Mapping) =
             serde_yml::from_value(state)?;

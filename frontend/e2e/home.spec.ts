@@ -6,6 +6,10 @@ test.beforeEach(async ({ request }) => {
   await request.post('__reset')
 })
 
+/** The two zones the fixture server streams on. */
+const ZONE_TV = '2f1c4f1e-0000-4000-8000-000000000001'
+const ZONE_DESK = '2f1c4f1e-0000-4000-8000-000000000002'
+
 /**
  * Wave 3's Home: the doctor.
  *
@@ -66,6 +70,30 @@ test.describe('home, the doctor', () => {
     await expect(page.getByTestId('home-health-draft')).toContainText('1 change')
     await expect(page.getByTestId('home-health-restart')).toContainText('not required')
     await expect(page.getByTestId('home-health-revision')).toContainText('3')
+  })
+
+  test('the services row counts the streaming areas', async ({ page }) => {
+    await page.goto('')
+
+    await expect(page.getByTestId('home-health-streams')).toContainText('2 of 2 streaming')
+  })
+
+  test('two streams are two rows, and stopping one leaves the other', async ({ page }) => {
+    await page.goto('')
+
+    const rows = page.getByTestId('home-stream-list').locator('> *')
+    await expect(rows).toHaveCount(2)
+
+    const first = page.getByTestId(`home-stream-${ZONE_TV}`)
+    await expect(first).toContainText('Living room TV')
+    await expect(first).toContainText('50 in / 20 out fps')
+    await expect(page.getByTestId(`home-stream-${ZONE_DESK}`)).toContainText('Desk monitor')
+
+    await page.getByTestId(`home-stream-${ZONE_TV}-stop`).click()
+
+    await expect(page.getByTestId(`home-stream-${ZONE_TV}`)).toHaveCount(0)
+    await expect(page.getByTestId(`home-stream-${ZONE_DESK}`)).toContainText('Desk monitor')
+    await expect(page.getByTestId('home-health-streams')).toContainText('1 of 2 streaming')
   })
 
   test('quick actions are at most three and none of them is decorative', async ({ page }) => {

@@ -30,6 +30,10 @@ use bifrost_api::config::{
     AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, PairingConfig, RoomConfig,
     Z2mServer,
 };
+use bifrost_api::entertainment::{
+    EntertainmentCapabilities, EntertainmentConfigurationSummary, EntertainmentDevice,
+    EntertainmentStatus, StreamStats,
+};
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
     InventorySnapshot, InventoryUpdate, PermitJoinRequest, PermitJoinResponse, PermitJoinState,
@@ -126,6 +130,12 @@ fn export_typescript_bindings() {
     ResourceRef::export_all(&cfg).unwrap();
     RoomRef::export_all(&cfg).unwrap();
     ServerInfo::export_all(&cfg).unwrap();
+
+    EntertainmentCapabilities::export_all(&cfg).unwrap();
+    EntertainmentConfigurationSummary::export_all(&cfg).unwrap();
+    EntertainmentDevice::export_all(&cfg).unwrap();
+    EntertainmentStatus::export_all(&cfg).unwrap();
+    StreamStats::export_all(&cfg).unwrap();
 
     LinkButtonStatus::export_all(&cfg).unwrap();
     LinkButtonPress::export_all(&cfg).unwrap();

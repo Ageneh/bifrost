@@ -2,6 +2,7 @@ pub mod auth;
 pub mod certificate;
 pub mod config;
 pub mod devices;
+pub mod entertainment;
 pub mod identity;
 pub mod logs;
 pub mod pairing;
@@ -327,6 +328,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/bridge/certificate", certificate::router())
         .nest("/bridge/identity", identity::router())
         .nest("/devices", devices::router())
+        .nest("/entertainment", entertainment::router())
         .nest("/z2m", z2m::router())
         .nest("/config", config::router())
         .nest("/logs", logs::router())

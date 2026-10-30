@@ -146,6 +146,9 @@ fn bifrost_effect(field: &str) -> Effect {
         cert_file => Effect::Restart("the certificate is only loaded at startup"),
         // read on every request; and never changed by an apply anyway
         auth => Effect::Live,
+        // read on every accept, and patched into the advertised state when
+        // the configuration is applied
+        entertainment => Effect::Live,
         unknown => UNREAD,
     })
     .into_iter()

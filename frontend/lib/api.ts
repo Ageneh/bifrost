@@ -14,6 +14,8 @@ import type { DeviceInfo } from './generated/DeviceInfo'
 import type { DraftPatch } from './generated/DraftPatch'
 import type { DraftResponse } from './generated/DraftResponse'
 import type { DraftWrite } from './generated/DraftWrite'
+import type { EntertainmentCapabilities } from './generated/EntertainmentCapabilities'
+import type { EntertainmentStatus } from './generated/EntertainmentStatus'
 import type { IdentityBundle } from './generated/IdentityBundle'
 import type { IdentityMacChange } from './generated/IdentityMacChange'
 import type { IdentityMacChangeReply } from './generated/IdentityMacChangeReply'
@@ -314,6 +316,39 @@ export class ApiClient {
   /** The pairing mode and the attempts the bridge remembers. */
   pairing(): Promise<PairingHistory> {
     return this.request('bridge/pairing')
+  }
+
+  // ---- entertainment ---------------------------------------------------
+
+  /** What this bridge can stream on, and the zones that exist. */
+  entertainmentCapabilities(): Promise<EntertainmentCapabilities> {
+    return this.request('entertainment/capabilities')
+  }
+
+  /**
+   * What every stream is doing.
+   *
+   * Meant to be polled about once a second: the rates in the answer are
+   * measured over that second, and the socket only says when the set of
+   * streams changed.
+   */
+  entertainmentStatus(): Promise<EntertainmentStatus> {
+    return this.request('entertainment/status')
+  }
+
+  /**
+   * End the stream on one area.
+   *
+   * There is no start: a stream begins when the TV or the Sync app sends its
+   * first frame, and a button here could only announce frames no client will
+   * send.
+   */
+  stopStream(area: string): Promise<void> {
+    return this.request(`entertainment/${encodeURIComponent(area)}/stop`, {
+      method: 'POST',
+      body: {},
+      csrf: true,
+    })
   }
 
   // ---- identity --------------------------------------------------------

@@ -324,6 +324,17 @@ async fn apply(
         );
     }
 
+    // the advertised stream limit lives in the state, and it is what a
+    // client reads to decide how many streams it may open: a changed setting
+    // that only took effect at the next start would leave the two disagreeing
+    let limit = outcome.applied.bifrost.entertainment.max_streams;
+    state
+        .res
+        .lock()
+        .await
+        .patch_max_streams(limit)
+        .map_err(|err| ConfigApiError::Internal(err.to_string()))?;
+
     log::info!(
         "Applied configuration revision {}: {} change(s), {} restart(s) required",
         outcome.revision,
@@ -711,6 +722,38 @@ mod tests {
         assert!(store.draft().is_none());
         assert!(store.paths().backup.exists());
         assert_eq!(fixture.applied.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_changed_stream_limit_is_advertised_at_once() {
+        let fixture = Fixture::new().await;
+        fixture
+            .call(
+                Method::PATCH,
+                "/draft",
+                Some(json!({"revision": 0, "patch": {"bifrost": {"entertainment": {"max_streams": 3}}}})),
+            )
+            .await;
+
+        let (status, body) = fixture
+            .call(Method::POST, "/apply", Some(json!({"revision": 1})))
+            .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["plan"]["hot"],
+            json!([{"action": "update", "path": "bifrost.entertainment.max_streams"}])
+        );
+        assert_eq!(body["plan"]["restart_required"], json!([]));
+
+        // the state advertises the new value without a restart
+        let res = fixture.state.res.lock().await;
+        let ent = res
+            .get_resource_ids_by_type(hue::api::RType::Entertainment)
+            .into_iter()
+            .filter_map(|id| res.get_id::<hue::api::Entertainment>(id).ok())
+            .find_map(|ent| ent.max_streams);
+        assert_eq!(ent, Some(3));
     }
 
     #[tokio::test]

@@ -21,9 +21,12 @@ pub enum BackendRequest {
 
     Delete(ResourceLink),
 
+    /// The area names the entertainment configuration, so every command that
+    /// follows carries it: two areas stream at once and a backend must route
+    /// each one to its own state.
     EntertainmentStart(Uuid),
-    EntertainmentFrame(HueStreamLightsV2),
-    EntertainmentStop(),
+    EntertainmentFrame(Uuid, HueStreamLightsV2),
+    EntertainmentStop(Uuid),
 
     ZigbeeDeviceDiscovery(ResourceLink, ZigbeeDeviceDiscoveryUpdate),
 }

@@ -7,7 +7,7 @@ pub mod learn;
 pub mod websocket;
 pub mod zclcommand;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::Duration;
@@ -21,26 +21,28 @@ use svc::traits::{BoxDynService, Service};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
 };
+use uuid::Uuid;
 
 use bifrost_api::backend::BackendRequest;
 use hue::api::ResourceLink;
 use z2m::update::DeviceUpdate;
 
-use crate::backend::z2m::entertainment::EntStream;
+use crate::backend::z2m::entertainment::AreaStream;
 use crate::backend::z2m::learn::SceneLearn;
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
 use crate::inventory::{GroupRef, Inventory};
-use crate::model::throttle::Throttle;
 use crate::resource::Resources;
 use crate::server::appstate::AppState;
+use crate::server::streams::StreamRegistry;
 
 #[derive(Error, Debug)]
 pub enum TemplateError {
@@ -144,6 +146,7 @@ impl ServiceTemplate for Z2mServiceTemplate {
         )
         .map_err(SvcError::generation)?
         .with_inventory(self.state.inventory())
+        .with_streams(self.state.streams())
         .with_commands(self.state.backends());
 
         Ok(svc.boxed())
@@ -164,14 +167,21 @@ pub struct Z2mBackend {
     group_of: HashMap<String, GroupRef>,
     /// The id of each z2m group, by friendly name.
     group_ids: HashMap<String, u32>,
-    entstream: Option<EntStream>,
-    counter: u32,
+    /// One stream per entertainment area. Two areas run side by side, each
+    /// with its own throttle and its own Zigbee sequence counter: a shared
+    /// 20 fps budget would make "independent fps" a lie.
+    entstreams: BTreeMap<Uuid, AreaStream>,
+    /// The Zigbee sequence counter each area stopped at, so a stream that
+    /// starts again continues where it left off.
+    counters: BTreeMap<Uuid, u32>,
     fps: u32,
-    throttle: Throttle,
     socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     /// Where what this backend learns is published. Absent in a unit test
     /// that drives the backend without one.
     inventory: Option<Arc<Inventory>>,
+    /// Where the entertainment streams are counted, absent in a unit test
+    /// that drives the backend without one.
+    streams: Option<Arc<StreamRegistry>>,
     /// The channel the admin API reaches this backend on.
     commands: Option<Arc<BackendCommands>>,
     /// This instance's claim on that channel, taken when it starts.
@@ -201,8 +211,8 @@ impl Z2mBackend {
         let network = HashMap::new();
         let group_of = HashMap::new();
         let group_ids = HashMap::new();
-        let entstream = None;
-        let throttle = Throttle::from_fps(fps);
+        let entstreams = BTreeMap::new();
+        let counters = BTreeMap::new();
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         Ok(Self {
             name,
@@ -216,14 +226,14 @@ impl Z2mBackend {
             network,
             group_of,
             group_ids,
-            entstream,
-            throttle,
+            entstreams,
+            counters,
             fps,
             message_rx,
             message_tx,
             socket: None,
-            counter: 0,
             inventory: None,
+            streams: None,
             commands: None,
             command_token: None,
             command_rx: None,
@@ -237,6 +247,13 @@ impl Z2mBackend {
     #[must_use]
     pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
         self.inventory = Some(inventory);
+        self
+    }
+
+    /// Count this backend's frames in `streams`.
+    #[must_use]
+    pub fn with_streams(mut self, streams: Arc<StreamRegistry>) -> Self {
+        self.streams = Some(streams);
         self
     }
 
@@ -264,18 +281,42 @@ impl Z2mBackend {
     pub async fn event_loop(
         &mut self,
         chan: &mut Receiver<Arc<BackendRequest>>,
+        frames: &mut Receiver<Arc<BackendRequest>>,
         mut socket: Z2mWebSocket,
         commands: Option<&mut mpsc::UnboundedReceiver<Z2mCommand>>,
     ) -> ApiResult<()> {
         let mut commands = commands;
+        let mut frames_open = true;
         loop {
             select! {
                 // all backend event handling implemented in backend::z2m::backend_event
                 pkt = chan.recv() => {
-                    let api_req = pkt?;
-                    self.handle_backend_event(&mut socket, api_req).await?;
-                    // FIXME: this used to be our "throttle" feature, but it breaks entertainment mode
-                    /* tokio::time::sleep(std::time::Duration::from_millis(100)).await; */
+                    match pkt {
+                        Ok(api_req) => self.handle_backend_event(&mut socket, api_req).await?,
+                        // the control channel never carries frames, so lag
+                        // here means this backend is behind on state changes;
+                        // dropping them beats ending the loop
+                        Err(broadcast::error::RecvError::Lagged(missed)) => {
+                            log::warn!("[{}] Backend events lagged, dropped {missed}", self.name);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            return Err(ApiError::UnexpectedZ2mEof);
+                        }
+                    }
+                },
+
+                // entertainment frames, on their own channel: a backend that
+                // falls behind drops frames and keeps running
+                frame = recv_frame(&mut frames_open, frames) => {
+                    match frame {
+                        Some(Ok(frame)) => self.handle_backend_event(&mut socket, frame).await?,
+                        Some(Err(broadcast::error::RecvError::Lagged(missed))) => {
+                            log::debug!("[{}] Dropped {missed} entertainment frames", self.name);
+                        }
+                        Some(Err(broadcast::error::RecvError::Closed)) | None => {
+                            frames_open = false;
+                        }
+                    }
                 },
 
                 // all bridge event handling implemented in backend::z2m::bridge_event
@@ -330,6 +371,21 @@ async fn recv_command(
         Some(commands) => commands.recv().await,
         None => std::future::pending().await,
     }
+}
+
+/// Await the next frame, or nothing once the frame channel is closed.
+///
+/// A closed channel returns immediately on every poll, which would spin the
+/// event loop; the flag turns that branch into one that never completes.
+async fn recv_frame(
+    open: &mut bool,
+    frames: &mut Receiver<Arc<BackendRequest>>,
+) -> Option<Result<Arc<BackendRequest>, broadcast::error::RecvError>> {
+    if !*open {
+        return std::future::pending().await;
+    }
+
+    Some(frames.recv().await)
 }
 
 #[async_trait]
@@ -406,10 +462,13 @@ impl Service for Z2mBackend {
             }
 
             let z2m_socket = Z2mWebSocket::new(self.name.clone(), socket);
-            let mut chan = self.state.lock().await.backend_event_stream();
+            let (mut chan, mut frames) = {
+                let lock = self.state.lock().await;
+                (lock.backend_event_stream(), lock.frame_stream())
+            };
             let mut command_rx = self.command_rx.take();
             let res = self
-                .event_loop(&mut chan, z2m_socket, command_rx.as_mut())
+                .event_loop(&mut chan, &mut frames, z2m_socket, command_rx.as_mut())
                 .await;
             self.command_rx = command_rx;
 

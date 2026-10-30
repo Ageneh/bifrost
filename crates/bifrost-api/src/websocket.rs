@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::admin::{LinkButtonStatus, LogRecord};
 use crate::backend::BackendRequest;
 use crate::config::AppConfig;
+use crate::entertainment::EntertainmentStatus;
 use crate::inventory::InventoryUpdate;
 use crate::service::Service;
 
@@ -20,4 +21,7 @@ pub enum Update {
     Inventory(InventoryUpdate),
     /// The pairing window opened, was consumed, or is a snapshot.
     LinkButton(LinkButtonStatus),
+    /// A stream started, ended or failed. Sent when the set changes, never
+    /// per frame: the rates come from polling the status endpoint.
+    EntertainmentStatus(EntertainmentStatus),
 }
