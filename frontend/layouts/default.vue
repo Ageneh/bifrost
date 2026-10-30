@@ -34,9 +34,15 @@ const bridgeName = computed(() => 'Bifrost')
     >
       <slot />
       <template #status>
+        <div class="draft-slot">
+          <DraftBar />
+        </div>
+        <RestartBanner />
         <LanRiskNotice />
       </template>
     </AppShell>
+
+    <DraftPill v-if="authenticated" />
   </div>
 </template>
 
@@ -48,5 +54,11 @@ const bridgeName = computed(() => 'Bifrost')
   display: grid;
   place-items: center;
   min-height: 100vh;
+}
+/* the status column stacks below the fold on a tablet; the pill replaces it */
+@media (max-width: 1000px) {
+  .draft-slot {
+    display: none;
+  }
 }
 </style>
