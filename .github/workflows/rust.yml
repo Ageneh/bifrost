@@ -63,6 +63,37 @@ jobs:
     - name: Web UI behind a path-prefix proxy
       run: scripts/ui-prefix.sh
 
+  playwright:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 10
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+        cache-dependency-path: frontend/pnpm-lock.yaml
+
+    - name: Install toolchain
+      run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+        rustup default "$RUST_TOOLCHAIN"
+
+    - name: Install the browser
+      run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+    # The suite runs against the release binary built here, not a dev
+    # server: scripts/e2e-release.sh builds the bundle, embeds it, boots the
+    # binary, and release.spec.ts hashes what it serves.
+    - name: Playwright against the release binary
+      run: scripts/e2e-release.sh
+
   docker:
 
     if: github.event_name == 'pull_request'
