@@ -12,6 +12,24 @@ use zcl::attr::ZclDataType;
 
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::error::ApiResult;
+use crate::model::throttle::Throttle;
+
+/// One area's running stream: the stream itself and the rate it is allowed
+/// to send at.
+///
+/// The throttle belongs to the area, not to the backend: two zones each get
+/// the configured frame rate, and neither can starve the other.
+pub struct AreaStream {
+    pub stream: EntStream,
+    pub throttle: Throttle,
+}
+
+impl AreaStream {
+    #[must_use]
+    pub fn new(stream: EntStream, throttle: Throttle) -> Self {
+        Self { stream, throttle }
+    }
+}
 
 pub struct EntStream {
     pub stream: EntertainmentZigbeeStream,
@@ -30,6 +48,13 @@ impl EntStream {
             addrs,
             modes,
         }
+    }
+
+    /// The Zigbee sequence counter the stream is at, so the next stream for
+    /// the same area can continue from it.
+    #[must_use]
+    pub const fn counter(&self) -> u32 {
+        self.stream.counter()
     }
 
     #[must_use]

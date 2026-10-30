@@ -19,10 +19,11 @@ use hue::stream::HueStreamLightsV2;
 use z2m::update::{DeviceEffect, DeviceUpdate};
 
 use crate::backend::z2m::Z2mBackend;
-use crate::backend::z2m::entertainment::EntStream;
+use crate::backend::z2m::entertainment::{AreaStream, EntStream};
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::error::ApiResult;
 use crate::model::state::AuxData;
+use crate::model::throttle::Throttle;
 
 impl Z2mBackend {
     #[allow(clippy::match_same_arms)]
@@ -417,20 +418,23 @@ impl Z2mBackend {
         drop(lock);
 
         if let Some(target) = targets.first() {
-            let mut es = EntStream::new(self.counter, target, addrs);
+            let counter = self.counters.get(ent_id).copied().unwrap_or_default();
+            let throttle = Throttle::from_fps(self.fps);
+            let mut es = EntStream::new(counter, target, addrs);
 
             // Not even a real Philips Hue bridge uses this trick!
             //
             // We set the entertainment mode fade speed ("smoothing")
             // to fit the target frame rate, to ensure perfectly smooth
             // transitionss, even at low frame rates!
-            es.stream.set_smoothing_duration(self.throttle.interval())?;
+            es.stream.set_smoothing_duration(throttle.interval())?;
 
             log::info!("Starting entertainment mode stream at {} fps", self.fps);
 
             es.start_stream(z2mws).await?;
 
-            self.entstream = Some(es);
+            self.entstreams
+                .insert(*ent_id, AreaStream::new(es, throttle));
         } else {
             log::debug!(
                 "[{}] Area {ent_id} has no lights this server owns; ignoring",
@@ -444,12 +448,12 @@ impl Z2mBackend {
     async fn backend_entertainment_frame(
         &mut self,
         z2mws: &mut Z2mWebSocket,
-        _area: &Uuid,
+        area: &Uuid,
         frame: &HueStreamLightsV2,
     ) -> ApiResult<()> {
-        if let Some(es) = &mut self.entstream {
-            if self.throttle.tick() {
-                es.frame(z2mws, frame).await?;
+        if let Some(es) = self.entstreams.get_mut(area) {
+            if es.throttle.tick() {
+                es.stream.frame(z2mws, frame).await?;
             }
         }
 
@@ -459,28 +463,38 @@ impl Z2mBackend {
     async fn backend_entertainment_stop(
         &mut self,
         z2mws: &mut Z2mWebSocket,
-        _area: &Uuid,
+        area: &Uuid,
     ) -> ApiResult<()> {
-        log::debug!("Stopping entertainment mode..");
-        if let Some(es) = &mut self.entstream.take() {
+        log::debug!(
+            "[{}] Stopping entertainment mode for area {area}",
+            self.name
+        );
+        if let Some(mut es) = self.entstreams.remove(area) {
+            es.stream.stop_stream(z2mws).await?;
+
+            self.counters.insert(*area, es.stream.counter());
+
             let mut lock = self.state.lock().await;
 
-            es.stop_stream(z2mws).await?;
+            // only this area's lights and status: the other area is still
+            // streaming and must not be touched
+            let Ok(ec) = lock.get_id::<EntertainmentConfiguration>(*area) else {
+                return Ok(());
+            };
+            let light_ids: Vec<Uuid> = ec.light_services.iter().map(|link| link.rid).collect();
+            let ec_streaming = ec.is_streaming();
 
-            self.counter = es.stream.counter();
-
-            for id in lock.get_resource_ids_by_type(RType::Light) {
-                let light: &Light = lock.get_id(id)?;
+            for id in light_ids {
+                let Ok(light) = lock.get_id::<Light>(id) else {
+                    continue;
+                };
                 if light.is_streaming() {
                     lock.update(&id, Light::stop_streaming)?;
                 }
             }
 
-            for id in lock.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
-                let ec: &EntertainmentConfiguration = lock.get_id(id)?;
-                if ec.is_streaming() {
-                    lock.update(&id, EntertainmentConfiguration::stop_streaming)?;
-                }
+            if ec_streaming {
+                lock.update(area, EntertainmentConfiguration::stop_streaming)?;
             }
             drop(lock);
         }

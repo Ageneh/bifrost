@@ -19,7 +19,10 @@ use bifrost::error::ApiResult;
 use bifrost::server::appstate::AppState;
 use bifrost::service_registry::{self, AppServiceFactory, ServiceFactory};
 use bifrost_api::backend::BackendRequest;
-use hue::api::{Entertainment, LightUpdate, RType, ResourceLink};
+use hue::api::{
+    Entertainment, EntertainmentConfiguration, EntertainmentConfigurationStatus, Light, LightMode,
+    LightUpdate, RType, ResourceLink,
+};
 use support::entertainment::{add_area, frame};
 use support::mock_z2m::{MockZ2m, fixture_path};
 use support::temp_dir::TempDir;
@@ -67,7 +70,16 @@ struct Fixture {
 impl Fixture {
     /// Start Bifrost against the two mock servers, `a` and `b`.
     async fn start(a: &MockZ2m, b: &MockZ2m) -> Self {
+        Self::start_with(&[("serverA", a.url()), ("serverB", b.url())]).await
+    }
+
+    /// Start Bifrost against the named z2m servers.
+    async fn start_with(servers: &[(&str, &str)]) -> Self {
         let dir = TempDir::new();
+        let servers: String = servers
+            .iter()
+            .map(|(name, url)| format!("  {name}:\n    url: {url}\n"))
+            .collect::<String>();
         let yaml = format!(
             "\
 bridge:
@@ -79,13 +91,7 @@ bridge:
   timezone: UTC
 
 z2m:
-  serverA:
-    url: {}
-  serverB:
-    url: {}
-",
-            a.url(),
-            b.url()
+{servers}"
         );
         let store = Arc::new(ConfigStore::load(&dir.write("config.yaml", &yaml)).unwrap());
         let (svm, _future) = ServiceManager::spawn();
@@ -413,4 +419,115 @@ async fn frames_do_not_travel_on_the_control_channel() {
         .expect("no control request")
         .expect("the control channel closed");
     assert!(matches!(&*got, BackendRequest::LightUpdate(..)));
+}
+
+/// Two areas on one server: each keeps its own throttle, and stopping one
+/// leaves the other streaming.
+#[tokio::test]
+async fn two_areas_on_one_server_stream_independently() {
+    let mock = MockZ2m::start(&fixture_path("w07/z2m/server-both.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start_with(&[("server1", mock.url())]).await;
+    fixture.wait_for_lights().await;
+
+    let ent_a = fixture.entertainment(fixture.light(LIGHT_A)).await;
+    let ent_b = fixture.entertainment(fixture.light(LIGHT_B)).await;
+    let (area_a, area_b) = {
+        let mut res = fixture.state.res.lock().await;
+        (
+            add_area(&mut res, "TV", &[ent_a]),
+            add_area(&mut res, "Desk", &[ent_b]),
+        )
+    };
+
+    fixture
+        .request(BackendRequest::EntertainmentStart(area_a))
+        .await;
+    fixture
+        .request(BackendRequest::EntertainmentStart(area_b))
+        .await;
+    wait_for_count(&mock, "TV left/set", 1).await;
+    wait_for_count(&mock, "TV right/set", 1).await;
+
+    // one frame for each area in quick succession, once each area's own
+    // interval has passed. A throttle shared by the backend would spend its
+    // one tick on the first and drop the second.
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let before_left = mock.received_on("TV left/set").len();
+    let before_right = mock.received_on("TV right/set").len();
+    fixture
+        .request(BackendRequest::EntertainmentFrame(area_a, frame(1)))
+        .await;
+    fixture
+        .request(BackendRequest::EntertainmentFrame(area_b, frame(1)))
+        .await;
+
+    wait_for_count(&mock, "TV left/set", before_left + 1).await;
+    wait_for_count(&mock, "TV right/set", before_right + 1).await;
+
+    // both areas are streaming, as the v2 API would have recorded it
+    {
+        let mut res = fixture.state.res.lock().await;
+        for id in [fixture.light(LIGHT_A).rid, fixture.light(LIGHT_B).rid] {
+            res.update::<Light>(&id, |light| {
+                light.mode = LightMode::Streaming;
+            })
+            .unwrap();
+        }
+        for (area, name) in [(area_a, "TV"), (area_b, "Desk")] {
+            res.update::<EntertainmentConfiguration>(&area, |ec| {
+                ec.status = EntertainmentConfigurationStatus::Active;
+                ec.metadata.name = name.to_string();
+            })
+            .unwrap();
+        }
+    }
+
+    fixture
+        .request(BackendRequest::EntertainmentStop(area_a))
+        .await;
+
+    // the area that stopped is back to normal; the other one is untouched.
+    // the backend handles the stop on its own task, so give it a moment
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while fixture
+        .state
+        .res
+        .lock()
+        .await
+        .get_id::<Light>(fixture.light(LIGHT_A).rid)
+        .unwrap()
+        .mode
+        == LightMode::Streaming
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the stopped area's light never left streaming mode"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    {
+        let res = fixture.state.res.lock().await;
+
+        let light_a = res.get_id::<Light>(fixture.light(LIGHT_A).rid).unwrap();
+        let light_b = res.get_id::<Light>(fixture.light(LIGHT_B).rid).unwrap();
+        assert_eq!(light_a.mode, LightMode::Normal, "the stopped area's light");
+        assert_eq!(light_b.mode, LightMode::Streaming, "the other area's light");
+
+        let ec_a = res.get_id::<EntertainmentConfiguration>(area_a).unwrap();
+        let ec_b = res.get_id::<EntertainmentConfiguration>(area_b).unwrap();
+        assert!(!ec_a.is_streaming(), "the stopped area is still active");
+        assert!(ec_b.is_streaming(), "the other area was stopped with it");
+    }
+
+    // and the other area still takes frames
+    let before_right = mock.received_on("TV right/set").len();
+    for _ in 0..5 {
+        fixture
+            .request(BackendRequest::EntertainmentFrame(area_b, frame(1)))
+            .await;
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+    wait_for_count(&mock, "TV right/set", before_right + 1).await;
 }

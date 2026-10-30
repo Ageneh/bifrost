@@ -7,7 +7,7 @@ pub mod learn;
 pub mod websocket;
 pub mod zclcommand;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::Duration;
@@ -27,19 +27,19 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
 };
+use uuid::Uuid;
 
 use bifrost_api::backend::BackendRequest;
 use hue::api::ResourceLink;
 use z2m::update::DeviceUpdate;
 
-use crate::backend::z2m::entertainment::EntStream;
+use crate::backend::z2m::entertainment::AreaStream;
 use crate::backend::z2m::learn::SceneLearn;
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
 use crate::inventory::{GroupRef, Inventory};
-use crate::model::throttle::Throttle;
 use crate::resource::Resources;
 use crate::server::appstate::AppState;
 
@@ -165,10 +165,14 @@ pub struct Z2mBackend {
     group_of: HashMap<String, GroupRef>,
     /// The id of each z2m group, by friendly name.
     group_ids: HashMap<String, u32>,
-    entstream: Option<EntStream>,
-    counter: u32,
+    /// One stream per entertainment area. Two areas run side by side, each
+    /// with its own throttle and its own Zigbee sequence counter: a shared
+    /// 20 fps budget would make "independent fps" a lie.
+    entstreams: BTreeMap<Uuid, AreaStream>,
+    /// The Zigbee sequence counter each area stopped at, so a stream that
+    /// starts again continues where it left off.
+    counters: BTreeMap<Uuid, u32>,
     fps: u32,
-    throttle: Throttle,
     socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     /// Where what this backend learns is published. Absent in a unit test
     /// that drives the backend without one.
@@ -202,8 +206,8 @@ impl Z2mBackend {
         let network = HashMap::new();
         let group_of = HashMap::new();
         let group_ids = HashMap::new();
-        let entstream = None;
-        let throttle = Throttle::from_fps(fps);
+        let entstreams = BTreeMap::new();
+        let counters = BTreeMap::new();
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         Ok(Self {
             name,
@@ -217,13 +221,12 @@ impl Z2mBackend {
             network,
             group_of,
             group_ids,
-            entstream,
-            throttle,
+            entstreams,
+            counters,
             fps,
             message_rx,
             message_tx,
             socket: None,
-            counter: 0,
             inventory: None,
             commands: None,
             command_token: None,
