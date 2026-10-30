@@ -9,6 +9,18 @@ use tokio::sync::watch::{self, Receiver, Sender};
 
 use crate::error::ApiError;
 
+/// The mDNS instance name Bifrost announces for `mac`.
+#[must_use]
+pub fn instance_name(mac: MacAddress) -> String {
+    format!("bifrost-{}", hex::encode(&mac.bytes()[3..]))
+}
+
+/// The `.local` host name Bifrost announces for `mac`.
+#[must_use]
+pub fn host_name(mac: MacAddress) -> String {
+    format!("{}.local", instance_name(mac))
+}
+
 pub struct MdnsService {
     mac: MacAddress,
     ip: Ipv4Addr,
@@ -42,8 +54,8 @@ impl Service for MdnsService {
         let mdns = ServiceDaemon::new()?;
         mdns.enable_interface(IpAddr::from(self.ip))?;
         let service_type = "_hue._tcp.local.";
-        let instance_name = format!("bifrost-{}", hex::encode(&self.mac.bytes()[3..]));
-        let service_hostname = format!("{instance_name}.local.");
+        let instance_name = instance_name(self.mac);
+        let service_hostname = format!("{}.", host_name(self.mac));
         let service_addr = self.ip.to_string();
         let service_port = 443;
 

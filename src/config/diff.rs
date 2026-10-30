@@ -6,8 +6,8 @@ use serde_json::{Map, Value};
 
 pub use bifrost_api::admin::{ApplyAction, ApplyPlan, ConfigChange, Reason};
 
-use crate::config::AppConfig;
 use crate::config::redact::redacted;
+use crate::config::{AppConfig, BifrostConfig, BridgeConfig};
 
 pub const HTTP_SERVICE: &str = "http";
 pub const HTTPS_SERVICE: &str = "https";
@@ -44,15 +44,18 @@ pub fn diff(old: &AppConfig, new: &AppConfig) -> Vec<ConfigChange> {
 /// while running and what needs a restart.
 #[must_use]
 pub fn plan(old: &AppConfig, new: &AppConfig) -> ApplyPlan {
-    plan_changes(changes(old, new))
+    let servers: Vec<String> = new.z2m.servers.keys().cloned().collect();
+    plan_changes(changes(old, new), &servers)
 }
 
-fn plan_changes(changes: Vec<Change>) -> ApplyPlan {
+/// `servers` are the configured z2m servers, which every backend-wide
+/// change restarts.
+fn plan_changes(changes: Vec<Change>, servers: &[String]) -> ApplyPlan {
     let mut plan = ApplyPlan::default();
 
     for change in changes {
         let path = change.path.join(".");
-        match classify(&change) {
+        match classify(&change, servers) {
             Effect::Live => push_unique(&mut plan.hot, ApplyAction::Update { path }),
             Effect::Actions(actions) => {
                 for action in actions {
@@ -70,10 +73,30 @@ fn plan_changes(changes: Vec<Change>) -> ApplyPlan {
 }
 
 enum Effect {
+    /// Read on use: the change takes effect at once.
     Live,
     Actions(Vec<ApplyAction>),
     Restart(&'static str),
 }
+
+/// What changing each field of a settings struct takes, by field name.
+///
+/// The struct is destructured without `..`, so a field added to it fails
+/// to compile here until it is classified: no setting can fall through to
+/// a default and be reported as applied when it was not.
+macro_rules! field_effects {
+    ($ty:ident { $($field:ident => $effect:expr),* $(,)? }) => {{
+        #[allow(dead_code)]
+        const fn every_field_is_classified(value: &$ty) {
+            let $ty { $($field: _),* } = value;
+        }
+        vec![$((stringify!($field), $effect)),*]
+    }};
+}
+
+/// Settings this version does not know are kept but read by nothing, so
+/// changing one takes nothing.
+const UNREAD: Effect = Effect::Live;
 
 fn restart_services(services: &[&str]) -> Effect {
     Effect::Actions(
@@ -86,19 +109,67 @@ fn restart_services(services: &[&str]) -> Effect {
     )
 }
 
-fn classify(change: &Change) -> Effect {
+/// The z2m backends read rooms and devices when they are built, so a
+/// change to either needs every backend re-created.
+fn restart_backends(servers: &[String]) -> Effect {
+    Effect::Actions(
+        servers
+            .iter()
+            .map(|name| ApplyAction::RestartBackend { name: name.clone() })
+            .collect(),
+    )
+}
+
+fn bridge_effect(field: &str) -> Effect {
+    field_effects!(BridgeConfig {
+        name => Effect::Live,
+        mac => Effect::Restart(
+            "the bridge identity (certificate, bridge id) is derived from the MAC address at startup",
+        ),
+        ipaddress => restart_services(NETWORK_SERVICES),
+        http_port => restart_services(&[HTTP_SERVICE]),
+        https_port => restart_services(&[HTTPS_SERVICE]),
+        entm_port => restart_services(&[ENTERTAINMENT_SERVICE]),
+        netmask => restart_services(NETWORK_SERVICES),
+        gateway => restart_services(NETWORK_SERVICES),
+        timezone => Effect::Live,
+        unknown => UNREAD,
+    })
+    .into_iter()
+    .find_map(|(name, effect)| (name == field).then_some(effect))
+    .unwrap_or(UNREAD)
+}
+
+fn bifrost_effect(field: &str) -> Effect {
+    field_effects!(BifrostConfig {
+        state_file => Effect::Restart("the state file is only read at startup"),
+        cert_file => Effect::Restart("the certificate is only loaded at startup"),
+        // read on every request; and never changed by an apply anyway
+        auth => Effect::Live,
+        unknown => UNREAD,
+    })
+    .into_iter()
+    .find_map(|(name, effect)| (name == field).then_some(effect))
+    .unwrap_or(UNREAD)
+}
+
+fn classify(change: &Change, servers: &[String]) -> Effect {
+    // every top-level section has an arm below
+    let _ = field_effects!(AppConfig {
+        bridge => (),
+        z2m => (),
+        bifrost => (),
+        rooms => (),
+        unknown => (),
+    });
+
     let path: Vec<&str> = change.path.iter().map(String::as_str).collect();
 
     match path.as_slice() {
-        ["bridge", "http_port"] => restart_services(&[HTTP_SERVICE]),
-        ["bridge", "https_port"] => restart_services(&[HTTPS_SERVICE]),
-        ["bridge", "entm_port"] => restart_services(&[ENTERTAINMENT_SERVICE]),
-        ["bridge", "ipaddress" | "netmask" | "gateway"] => restart_services(NETWORK_SERVICES),
-        ["bridge", "mac"] => Effect::Restart(
-            "the bridge identity (certificate, bridge id) is derived from the MAC address at startup",
-        ),
-        ["bifrost", "state_file"] => Effect::Restart("the state file is only read at startup"),
-        ["bifrost", "cert_file"] => Effect::Restart("the certificate is only loaded at startup"),
+        ["bridge"] => Effect::Restart("the bridge section is only read at startup"),
+        ["bridge", field, ..] => bridge_effect(field),
+        ["bifrost"] => Effect::Restart("the bifrost section is only read at startup"),
+        ["bifrost", field, ..] => bifrost_effect(field),
         ["z2m", name] => {
             let name = (*name).to_string();
             Effect::Actions(vec![if change.before.is_null() {
@@ -112,7 +183,10 @@ fn classify(change: &Change) -> Effect {
         ["z2m", name, ..] => Effect::Actions(vec![ApplyAction::RestartBackend {
             name: (*name).to_string(),
         }]),
-        _ => Effect::Live,
+        // devices is not a typed section yet, but the backends will read it
+        ["z2m"] | ["rooms" | "devices", ..] => restart_backends(servers),
+        // the remaining top-level keys are unknown to this version
+        [..] => UNREAD,
     }
 }
 
@@ -190,12 +264,17 @@ mod tests {
         NETWORK_SERVICES, diff, plan, plan_changes,
     };
     use crate::config::redact::REDACTED;
-    use crate::config::{self, AppConfig};
+    use crate::config::{self, AppConfig, RoomConfig};
     use crate::testutil::{MINIMAL_CONFIG, TempDir};
 
     fn minimal() -> AppConfig {
         let dir = TempDir::new();
         config::parse(&dir.write("config.yaml", MINIMAL_CONFIG)).unwrap()
+    }
+
+    /// Plan `changes` with one z2m server, `server1`, configured.
+    fn plan_one_server(changes: Vec<Change>) -> ApplyPlan {
+        plan_changes(changes, &["server1".to_string()])
     }
 
     fn change(path: &str, before: Value, after: Value) -> Change {
@@ -219,13 +298,13 @@ mod tests {
     }
 
     fn assert_live(path: &str) {
-        let plan = plan_changes(vec![change(path, json!(1), json!(2))]);
+        let plan = plan_one_server(vec![change(path, json!(1), json!(2))]);
         assert_eq!(plan.hot, [update(path)], "{path}");
         assert_eq!(plan.restart_required, [], "{path}");
     }
 
     fn assert_restart_required(path: &str) {
-        let plan = plan_changes(vec![change(path, json!("a"), json!("b"))]);
+        let plan = plan_one_server(vec![change(path, json!("a"), json!("b"))]);
         assert_eq!(plan.hot, [], "{path}");
         assert_eq!(plan.restart_required.len(), 1, "{path}");
         assert_eq!(plan.restart_required[0].path, path);
@@ -243,14 +322,57 @@ mod tests {
         for path in [
             "bridge.name",
             "bridge.timezone",
-            "rooms.office.name",
-            "devices.lamp.name",
+            "bridge.future_setting",
             "auth.users",
             "pairing.enabled",
             "bifrost.entertainment.max_streams",
+            "bifrost.auth.idle_minutes",
         ] {
             assert_live(path);
         }
+    }
+
+    #[test]
+    fn rooms_and_devices_restart_every_backend() {
+        let servers = ["server1".to_string(), "server2".to_string()];
+        for path in ["rooms.office.name", "rooms.office", "devices.lamp.name"] {
+            let plan = plan_changes(vec![change(path, json!("a"), json!("b"))], &servers);
+            assert_eq!(
+                plan.hot,
+                [
+                    ApplyAction::RestartBackend {
+                        name: "server1".into()
+                    },
+                    ApplyAction::RestartBackend {
+                        name: "server2".into()
+                    },
+                ],
+                "{path}"
+            );
+            assert_eq!(plan.restart_required, [], "{path}");
+        }
+    }
+
+    #[test]
+    fn room_rename_is_not_reported_hot() {
+        let old = minimal();
+        let mut new = old.clone();
+        new.rooms.insert(
+            "office".into(),
+            RoomConfig {
+                name: Some("Office".into()),
+                ..Default::default()
+            },
+        );
+
+        let plan = plan(&old, &new);
+
+        assert_eq!(
+            plan.hot,
+            [ApplyAction::RestartBackend {
+                name: "server1".into()
+            }]
+        );
     }
 
     #[test]
@@ -260,7 +382,7 @@ mod tests {
             ("bridge.https_port", HTTPS_SERVICE),
             ("bridge.entm_port", ENTERTAINMENT_SERVICE),
         ] {
-            let plan = plan_changes(vec![change(path, json!(80), json!(8080))]);
+            let plan = plan_one_server(vec![change(path, json!(80), json!(8080))]);
             assert_eq!(plan.hot, [restart_service(service)], "{path}");
             assert_eq!(plan.restart_required, []);
         }
@@ -274,7 +396,7 @@ mod tests {
             .collect();
 
         for path in ["bridge.ipaddress", "bridge.netmask", "bridge.gateway"] {
-            let plan = plan_changes(vec![change(path, json!("10.0.0.1"), json!("10.0.0.2"))]);
+            let plan = plan_one_server(vec![change(path, json!("10.0.0.1"), json!("10.0.0.2"))]);
             assert_eq!(plan.hot, expected, "{path}");
         }
     }
@@ -288,7 +410,7 @@ mod tests {
 
     #[test]
     fn z2m_server_added_starts_backend() {
-        let plan = plan_changes(vec![change(
+        let plan = plan_one_server(vec![change(
             "z2m.new",
             Value::Null,
             json!({"url": "ws://x"}),
@@ -298,7 +420,7 @@ mod tests {
 
     #[test]
     fn z2m_server_removed_stops_backend() {
-        let plan = plan_changes(vec![change(
+        let plan = plan_one_server(vec![change(
             "z2m.old",
             json!({"url": "ws://x"}),
             Value::Null,
@@ -316,7 +438,7 @@ mod tests {
             "group_prefix",
         ] {
             let path = format!("z2m.server1.{field}");
-            let plan = plan_changes(vec![change(&path, json!(1), json!(2))]);
+            let plan = plan_one_server(vec![change(&path, json!(1), json!(2))]);
             assert_eq!(
                 plan.hot,
                 [ApplyAction::RestartBackend {
@@ -329,7 +451,7 @@ mod tests {
 
     #[test]
     fn repeated_actions_are_listed_once() {
-        let plan = plan_changes(vec![
+        let plan = plan_one_server(vec![
             change("bridge.ipaddress", json!("a"), json!("b")),
             change("bridge.netmask", json!("a"), json!("b")),
             change("z2m.server1.url", json!("a"), json!("b")),

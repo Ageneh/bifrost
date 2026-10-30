@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use crate::config::diff::{self, ApplyPlan, ConfigChange};
 use crate::config::validate::{self, ValidationError};
-use crate::config::{self, AppConfig};
+use crate::config::{self, AppConfig, AuthConfig, BifrostConfig};
 
 /// Permissions for every file the store creates. Configuration may hold
 /// secrets, so it is readable by the owner only.
@@ -27,6 +27,9 @@ const PRIVATE_FILE_MODE: u32 = 0o600;
 
 const DEFAULT_CONFIG_FILE_NAME: &str = "config.yaml";
 const DEFAULT_EXTENSION: &str = "yaml";
+
+/// Admin sessions, kept beside the state file.
+const SESSIONS_FILE_NAME: &str = "sessions.yaml";
 
 static RENAME_FALLBACK_LOGGED: Once = Once::new();
 
@@ -62,6 +65,7 @@ pub struct ConfigPaths {
     pub backup: Utf8PathBuf,
     pub state: Utf8PathBuf,
     pub cert: Utf8PathBuf,
+    pub sessions: Utf8PathBuf,
 }
 
 impl ConfigPaths {
@@ -71,17 +75,35 @@ impl ConfigPaths {
     /// working directory, exactly as before.
     #[must_use]
     pub fn resolve(config_file: &Utf8Path, config: &AppConfig) -> Self {
+        Self::resolve_with(config_file, &config.bifrost)
+    }
+
+    /// Paths for `config_file` with the default `bifrost` settings, for
+    /// setup mode, where no configuration can be read.
+    #[must_use]
+    pub fn with_defaults(config_file: &Utf8Path) -> Self {
+        Self::resolve_with(config_file, &BifrostConfig::default())
+    }
+
+    fn resolve_with(config_file: &Utf8Path, bifrost: &BifrostConfig) -> Self {
         let dir = config_file.parent().unwrap_or_else(|| Utf8Path::new(""));
         let file_name = config_file.file_name().unwrap_or(DEFAULT_CONFIG_FILE_NAME);
         let stem = config_file.file_stem().unwrap_or("config");
         let extension = config_file.extension().unwrap_or(DEFAULT_EXTENSION);
 
+        let state = dir.join(&bifrost.state_file);
+        let sessions = state
+            .parent()
+            .unwrap_or_else(|| Utf8Path::new(""))
+            .join(SESSIONS_FILE_NAME);
+
         Self {
             config: config_file.to_path_buf(),
             draft: dir.join(format!("{stem}.draft.{extension}")),
             backup: dir.join(format!("{file_name}.bak")),
-            state: dir.join(&config.bifrost.state_file),
-            cert: dir.join(&config.bifrost.cert_file),
+            state,
+            cert: dir.join(&bifrost.cert_file),
+            sessions,
         }
     }
 }
@@ -203,12 +225,21 @@ impl ConfigStore {
     }
 
     /// Replace the draft with `config` and persist it.
+    ///
+    /// `bifrost.auth` is not part of the draft: the draft always carries the
+    /// active authentication settings, whatever `config` holds.
     // the revision is bumped while the draft lock is held, so a concurrent
     // writer cannot pass the revision check in between
     #[allow(clippy::significant_drop_tightening)]
-    pub fn set_draft(&self, expected_revision: u64, config: AppConfig) -> ConfigStoreResult<Draft> {
+    pub fn set_draft(
+        &self,
+        expected_revision: u64,
+        mut config: AppConfig,
+    ) -> ConfigStoreResult<Draft> {
         let mut draft = write(&self.draft);
         self.check_revision(expected_revision)?;
+
+        config.bifrost.auth = read(&self.active).bifrost.auth.clone();
 
         let next = Draft {
             config,
@@ -265,6 +296,10 @@ impl ConfigStore {
             log::info!("Moved z2m tokens from url queries to the token field");
         }
 
+        // only update_auth changes authentication, even if the draft file
+        // was edited by hand
+        applied.bifrost.auth = read(&self.active).bifrost.auth.clone();
+
         let errors = validate::new_errors(&read(&self.active), &applied);
         if !errors.is_empty() {
             return Err(ConfigStoreError::Invalid(errors));
@@ -290,6 +325,41 @@ impl ConfigStore {
             previous,
             applied,
         })
+    }
+
+    /// Change the authentication settings, which the draft cannot touch.
+    ///
+    /// Takes effect and is written to the configuration file at once, and is
+    /// carried into the draft, so applying the draft never undoes it.
+    // the draft lock serializes this with apply and every draft write
+    #[allow(clippy::significant_drop_tightening)]
+    ///
+    /// `change` reports whether it changed anything; when it did not, nothing
+    /// is written. Returns what `change` reported.
+    pub fn update_auth(
+        &self,
+        change: impl FnOnce(&mut AuthConfig) -> bool,
+    ) -> ConfigStoreResult<bool> {
+        let mut draft = write(&self.draft);
+
+        let mut updated = self.active();
+        if !change(&mut updated.bifrost.auth) {
+            return Ok(false);
+        }
+
+        self.backup()?;
+        write_atomic(
+            &self.paths.config,
+            serde_yml::to_string(&updated)?.as_bytes(),
+        )?;
+
+        if let Some(draft) = draft.as_mut() {
+            draft.config.bifrost.auth = updated.bifrost.auth.clone();
+            write_atomic(&self.paths.draft, serde_yml::to_string(&*draft)?.as_bytes())?;
+        }
+
+        *write(&self.active) = updated;
+        Ok(true)
     }
 
     fn backup(&self) -> io::Result<()> {
@@ -400,6 +470,7 @@ mod tests {
         assert_eq!(paths.backup, "config.yaml.bak");
         assert_eq!(paths.state, "state.yaml");
         assert_eq!(paths.cert, "cert.pem");
+        assert_eq!(paths.sessions, "sessions.yaml");
     }
 
     #[test]
@@ -416,6 +487,76 @@ mod tests {
         assert_eq!(paths.backup, "/etc/bifrost/bifrost.yml.bak");
         assert_eq!(paths.cert, "/etc/bifrost/certs/cert.pem");
         assert_eq!(paths.state, "/var/lib/bifrost/state.yaml");
+        assert_eq!(paths.sessions, "/var/lib/bifrost/sessions.yaml");
+    }
+
+    #[test]
+    fn update_auth_writes_the_file_and_survives_reload() {
+        let dir = TempDir::new();
+        let store = store_in(&dir);
+        store.set_draft(0, store.active()).unwrap();
+
+        store
+            .update_auth(|auth| auth.password_hash.replace("$scrypt$test".into()).is_none())
+            .unwrap();
+
+        assert_eq!(
+            store.active().bifrost.auth.password_hash.as_deref(),
+            Some("$scrypt$test")
+        );
+        assert_eq!(
+            store
+                .draft()
+                .unwrap()
+                .config
+                .bifrost
+                .auth
+                .password_hash
+                .as_deref(),
+            Some("$scrypt$test")
+        );
+        assert_eq!(mode(&store.paths().config), 0o600);
+
+        let reloaded = ConfigStore::load(&store.paths().config).unwrap();
+        assert_eq!(
+            reloaded.active().bifrost.auth.password_hash.as_deref(),
+            Some("$scrypt$test")
+        );
+        assert_eq!(
+            reloaded.draft().unwrap().config.bifrost.auth,
+            reloaded.active().bifrost.auth
+        );
+    }
+
+    #[test]
+    fn draft_cannot_change_auth() {
+        let dir = TempDir::new();
+        let store = store_in(&dir);
+        store
+            .update_auth(|auth| auth.password_hash.replace("$scrypt$owner".into()).is_none())
+            .unwrap();
+
+        let mut config = store.active();
+        config.bifrost.auth.password_hash = Some("$scrypt$attacker".into());
+        config.bifrost.auth.trusted_cidrs = vec!["0.0.0.0/0".parse().unwrap()];
+        config.bridge.name = "Changed".into();
+        let draft = store.set_draft(0, config).unwrap();
+        assert_eq!(draft.config.bifrost.auth, store.active().bifrost.auth);
+
+        // a hand-edited draft file is not trusted either
+        let text = fs::read_to_string(&store.paths().draft)
+            .unwrap()
+            .replace("$scrypt$owner", "$scrypt$attacker");
+        fs::write(&store.paths().draft, text).unwrap();
+        let store = ConfigStore::load(&store.paths().config).unwrap();
+        let outcome = store.apply(store.revision()).unwrap();
+
+        assert_eq!(outcome.applied.bridge.name, "Changed");
+        assert_eq!(
+            store.active().bifrost.auth.password_hash.as_deref(),
+            Some("$scrypt$owner")
+        );
+        assert_eq!(store.active().bifrost.auth.trusted_cidrs.len(), 1);
     }
 
     #[test]

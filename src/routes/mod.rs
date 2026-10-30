@@ -6,6 +6,7 @@ use hue::legacy_api::ApiResourceType;
 use hyper::StatusCode;
 use serde_json::{Value, json};
 use thiserror::Error;
+use tower_http::cors::CorsLayer;
 
 use crate::error::ApiError;
 use crate::routes::clip::{V2Error, V2Reply};
@@ -159,8 +160,11 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub fn router(appstate: AppState) -> Router<()> {
-    Router::new()
+/// All routes. `hue_cors` wraps the Hue routes only: they are the
+/// compatibility contract and stay open to every origin, while `/bifrost`
+/// is same-origin only.
+pub fn router(appstate: AppState, hue_cors: CorsLayer) -> Router<()> {
+    let hue = Router::new()
         .nest("/api", api::router())
         .nest("/auth", auth::router())
         .nest("/updater", updater::router())
@@ -168,7 +172,11 @@ pub fn router(appstate: AppState) -> Router<()> {
         .nest("/description.xml", upnp::router())
         .nest("/clip/v2/resource", clip::router())
         .nest("/eventstream", eventstream::router())
-        .nest("/bifrost", bifrost::router())
+        .layer(hue_cors);
+
+    Router::new()
+        .merge(hue)
+        .nest("/bifrost", bifrost::router(appstate.clone()))
         .with_state(appstate)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
 }

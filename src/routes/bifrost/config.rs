@@ -8,9 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
-use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::future::BoxFuture;
@@ -36,6 +35,10 @@ use crate::service_registry::{self, AppServiceFactory};
 const RESTART_GRACE: Duration = Duration::from_millis(500);
 
 const YAML_CONTENT_TYPE: &str = "application/yaml";
+
+/// The authentication settings, which the draft cannot change.
+const AUTH_PATH: &str = "bifrost.auth";
+const AUTH_POINTER: &str = "/bifrost/auth";
 
 /// Brings running services in line with an applied configuration.
 pub type ApplyHook =
@@ -136,6 +139,18 @@ fn write_draft(
         validate::validate_value(&document).map_err(ConfigApiError::Invalid)?;
 
     let store = state.store();
+
+    // a document without the section keeps the active settings; one that
+    // names different settings is refused rather than silently dropped
+    if document.pointer(AUTH_POINTER).is_some()
+        && config.bifrost.auth != store.active().bifrost.auth
+    {
+        return Err(ConfigApiError::Invalid(vec![ValidationError::error(
+            AUTH_PATH,
+            "Authentication settings cannot be changed through the draft; use /bifrost/auth",
+        )]));
+    }
+
     let draft = store.set_draft(revision, config)?;
     draft_response(store.revision(), Some(&draft))
 }
@@ -280,22 +295,7 @@ async fn get_config(State(state): State<AppState>) -> ConfigApiResult<Json<Value
     Ok(Json(redacted_config(&state.config())?))
 }
 
-/// Stopgap until wave 2 adds authentication: refuses every request to the
-/// configuration admin API. Wave 2 replaces this with a real admin check.
-pub async fn require_admin(_req: Request, _next: Next) -> Response {
-    (
-        StatusCode::FORBIDDEN,
-        Json(ErrorResponse {
-            error:
-                "The configuration admin API requires authentication, which is not available yet"
-                    .to_string(),
-            errors: vec![],
-        }),
-    )
-        .into_response()
-}
-
-/// The admin endpoints, without the access guard.
+/// The admin endpoints, without the active configuration.
 pub fn admin_router(hook: ApplyHook) -> Router<AppState> {
     Router::new()
         .route(
@@ -324,12 +324,12 @@ fn reconcile_hook() -> ApplyHook {
     })
 }
 
-/// `GET /bifrost/config` keeps serving the (redacted) active configuration
-/// to existing clients; every admin endpoint sits behind [`require_admin`].
+/// The configuration routes. The access guard is applied by the `/bifrost`
+/// nest, which covers `GET /bifrost/config` too.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(get_config))
-        .merge(admin_router(reconcile_hook()).route_layer(middleware::from_fn(require_admin)))
+        .merge(admin_router(reconcile_hook()))
 }
 
 #[cfg(test)]
@@ -511,7 +511,7 @@ mod tests {
     async fn redacted_round_trip_keeps_secret() {
         let fixture = Fixture::new().await;
 
-        // GET / is served by the unguarded router
+        // the guard sits on the /bifrost nest, so this router serves GET /
         let (_, active) = call(
             &router().with_state(fixture.state.clone()),
             Method::GET,
@@ -702,6 +702,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn draft_refuses_auth_changes_and_keeps_auth_on_round_trip() {
+        let fixture = Fixture::new().await;
+        fixture
+            .state
+            .store()
+            .update_auth(|auth| {
+                auth.password_hash = Some("$scrypt$owner-hash".into());
+                true
+            })
+            .unwrap();
+
+        // the redacted document round-trips with the hash intact
+        let (_, active) = call(
+            &router().with_state(fixture.state.clone()),
+            Method::GET,
+            "/",
+            None,
+        )
+        .await;
+        assert_eq!(active["bifrost"]["auth"]["password_hash"], REDACTED);
+        let (status, _) = fixture.put_draft(0, active.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // a document without the section keeps the active settings
+        let mut without = active.clone();
+        without["bifrost"].as_object_mut().unwrap().remove("auth");
+        let (status, _) = fixture.put_draft(1, without).await;
+        assert_eq!(status, StatusCode::OK);
+
+        for patch in [
+            json!({"bifrost": {"auth": {"trusted_cidrs": ["0.0.0.0/0"]}}}),
+            json!({"bifrost": {"auth": {"password_hash": "$scrypt$attacker"}}}),
+            json!({"bifrost": {"auth": {"password_hash": ""}}}),
+            json!({"bifrost": {"auth": {"trust_ingress": false}}}),
+        ] {
+            let (status, body) = fixture
+                .call(
+                    Method::PATCH,
+                    "/draft",
+                    Some(json!({"revision": 2, "patch": patch})),
+                )
+                .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{patch}");
+            assert_eq!(body["errors"][0]["path"], "bifrost.auth", "{patch}");
+        }
+
+        let (status, _) = fixture
+            .call(Method::POST, "/apply", Some(json!({"revision": 2})))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            fixture.state.config().bifrost.auth.password_hash.as_deref(),
+            Some("$scrypt$owner-hash")
+        );
+    }
+
+    #[tokio::test]
     async fn token_field_is_write_only() {
         let fixture = Fixture::new().await;
         let unguarded = router().with_state(fixture.state.clone());
@@ -734,33 +791,5 @@ mod tests {
             changes,
             json!([{"path": "z2m.server1.token", "before": REDACTED, "after": null, "secret": true}])
         );
-    }
-
-    #[tokio::test]
-    async fn admin_api_is_guarded() {
-        let fixture = Fixture::new().await;
-        let guarded = router().with_state(fixture.state.clone());
-
-        for (method, uri) in [
-            (Method::GET, "/draft"),
-            (Method::PUT, "/draft"),
-            (Method::PATCH, "/draft"),
-            (Method::DELETE, "/draft"),
-            (Method::GET, "/diff"),
-            (Method::GET, "/validate"),
-            (Method::POST, "/validate"),
-            (Method::POST, "/apply"),
-            (Method::POST, "/restart"),
-            (Method::GET, "/export"),
-            (Method::POST, "/import"),
-        ] {
-            let (status, _) =
-                call(&guarded, method.clone(), uri, Some(json!({"revision": 0}))).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-        }
-
-        let (status, _) = call(&guarded, Method::GET, "/", None).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(fixture.state.store().revision(), 0);
     }
 }

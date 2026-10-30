@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use hue::legacy_api::{ApiConfig, ApiShortConfig, Whitelist};
 use svc::manager::SvmClient;
 
+use crate::auth::{Auth, HashCost, SystemClock};
 use crate::config::AppConfig;
 use crate::config_store::ConfigStore;
 use crate::error::ApiResult;
@@ -22,6 +23,7 @@ pub struct AppState {
     store: Arc<ConfigStore>,
     upd: Arc<Mutex<VersionUpdater>>,
     svm: SvmClient,
+    auth: Arc<Auth>,
     pub res: Arc<Mutex<Resources>>,
 }
 
@@ -70,12 +72,36 @@ impl AppState {
 
         let res = Arc::new(Mutex::new(res));
 
+        let auth = Arc::new(Auth::load(
+            &store.paths().sessions,
+            Arc::new(SystemClock),
+            HashCost::DEFAULT,
+        ));
+        if config.bifrost.auth.password_hash.is_none() {
+            // deleting the password is how a lost one is reset, and that
+            // must log out everyone who was logged in with it
+            auth.revoke_all()?;
+        }
+
         Ok(Self {
             store,
             upd,
             svm,
+            auth,
             res,
         })
+    }
+
+    /// Replace the authentication state, e.g. with one on a test clock.
+    #[must_use]
+    pub fn with_auth(mut self, auth: Arc<Auth>) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    #[must_use]
+    pub fn auth(&self) -> Arc<Auth> {
+        self.auth.clone()
     }
 
     /// Snapshot of the active configuration. Callers holding the snapshot
