@@ -108,6 +108,73 @@ impl Session {
         }
     }
 
+    /// Which area a v1 frame belongs to.
+    ///
+    /// A v1 client names lights, not an area, so the area has to be inferred.
+    /// "Best intersection" is ambiguous as soon as two zones share a light, so
+    /// the rule is deterministic: an area that is already streaming wins,
+    /// otherwise the area claiming strictly more of the frame's lights wins,
+    /// and a tie is refused rather than guessed. The refusal is what keeps a
+    /// second TV from being served colours meant for the first.
+    #[allow(clippy::result_large_err)]
+    pub fn select_area(res: &Resources, light_ids: &BTreeSet<Uuid>) -> ApiResult<Uuid> {
+        let mut candidates = vec![];
+
+        for uuid in res.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
+            let entconf = res.get_id::<EntertainmentConfiguration>(uuid)?;
+
+            let ent_light_ids: BTreeSet<Uuid> =
+                entconf.light_services.iter().map(|ls| ls.rid).collect();
+
+            let included = light_ids.intersection(&ent_light_ids).count();
+            if included == 0 {
+                // an area with none of the frame's lights cannot render it
+                continue;
+            }
+
+            candidates.push((uuid, included, entconf.is_streaming()));
+        }
+
+        let active: Vec<_> = candidates
+            .iter()
+            .filter(|(_, _, streaming)| *streaming)
+            .map(|(uuid, _, _)| *uuid)
+            .collect();
+
+        match active.as_slice() {
+            [only] => return Ok(*only),
+            [] => {}
+            several => return Err(ApiError::EntStreamAmbiguous(Self::area_names(res, several))),
+        }
+
+        let most = candidates.iter().map(|(_, included, _)| *included).max();
+
+        let best: Vec<_> = candidates
+            .iter()
+            .filter(|(_, included, _)| Some(*included) == most)
+            .map(|(uuid, _, _)| *uuid)
+            .collect();
+
+        match best.as_slice() {
+            [only] => Ok(*only),
+            [] => Err(ApiError::EntStreamInitError),
+            several => Err(ApiError::EntStreamAmbiguous(Self::area_names(res, several))),
+        }
+    }
+
+    /// The names of `areas`, sorted, for a refusal a person has to act on.
+    fn area_names(res: &Resources, areas: &[Uuid]) -> String {
+        let mut names: Vec<String> = areas
+            .iter()
+            .map(|uuid| {
+                res.get_id::<EntertainmentConfiguration>(*uuid)
+                    .map_or_else(|_| uuid.to_string(), |ec| ec.metadata.name.clone())
+            })
+            .collect();
+        names.sort();
+        names.join(", ")
+    }
+
     #[allow(clippy::unused_async, unreachable_code, unused_variables)]
     pub fn translate_v1_frame(
         res: &Resources,
@@ -120,32 +187,9 @@ impl Session {
         }
         let light_ids: BTreeSet<_> = lights.values().copied().collect();
 
-        let mut best_included = 0;
-        let mut best_excluded = 0;
-        let mut best_area = None;
+        let area = Self::select_area(res, &light_ids)?;
 
-        for uuid in res.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
-            let entconf = res.get_id::<EntertainmentConfiguration>(uuid)?;
-
-            let ent_light_ids: BTreeSet<Uuid> =
-                entconf.light_services.iter().map(|ls| ls.rid).collect();
-
-            let included = light_ids.intersection(&ent_light_ids).count();
-            let excluded = light_ids.difference(&ent_light_ids).count();
-
-            if (included > best_included)
-                || ((included == best_included) && (excluded < best_excluded))
-            {
-                log::trace!("Found candidate entertainment_configuration: {uuid}");
-                log::trace!("  lights included: {included}");
-                log::trace!("  lights excluded: {excluded}");
-                best_included = included;
-                best_excluded = excluded;
-                best_area = Some(uuid);
-            }
-        }
-
-        if let Some(area) = best_area {
+        {
             let mut mapping = BTreeMap::new();
             for (id_v1, id) in &lights {
                 let light: &Light = res.get_id(*id)?;
@@ -213,8 +257,6 @@ impl Session {
             };
 
             Ok(HueStreamPacketV2 { area, lights })
-        } else {
-            Err(ApiError::EntStreamInitError)
         }
     }
 

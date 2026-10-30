@@ -21,7 +21,7 @@ const items: NavItem[] = [
   { key: 'home', label: 'Home', path: '/' },
   { key: 'devices', label: 'Devices', path: '/devices' },
   { key: 'rooms', label: 'Rooms', path: '/rooms' },
-  { key: 'entertainment', label: 'Entertainment', path: '/entertainment', pending: true },
+  { key: 'entertainment', label: 'Entertainment', path: '/entertainment' },
   { key: 'pairing', label: 'Pairing', path: '/pairing' },
   { key: 'system', label: 'System', path: '/system/bridge' },
 ]

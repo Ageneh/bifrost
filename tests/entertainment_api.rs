@@ -285,6 +285,64 @@ async fn stop_answers_not_found_for_anything_that_is_not_streaming() {
     }
 }
 
+/// One zone, as the editor reads it: its positions, and the channels derived
+/// from them.
+#[tokio::test]
+async fn a_zone_is_read_with_its_positions_and_channels() {
+    let mock = MockZ2m::start(&fixture_path("w07/z2m/server-both.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start(&mock).await;
+    fixture.wait_for_lights().await;
+
+    let area = {
+        let mut res = fixture.state.res.lock().await;
+        let ent_a = res
+            .get_resource_ids_by_type(hue::api::RType::Entertainment)
+            .into_iter()
+            .find(|id| {
+                res.get_id::<hue::api::Entertainment>(*id)
+                    .is_ok_and(|ent| ent.renderer_reference.is_some())
+            })
+            .expect("no entertainment service was imported");
+
+        let link = hue::api::RType::Entertainment.link_to(ent_a);
+        let area = add_area(&mut res, "TV", &[link]);
+        drop(res);
+        area
+    };
+
+    let (status, body) = fixture
+        .get(&format!("/bifrost/entertainment/configurations/{area}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(body["id"], area.to_string(), "{body}");
+    assert_eq!(body["name"], "TV", "{body}");
+    assert_eq!(body["configuration_type"], "screen", "{body}");
+    assert_eq!(body["status"], "inactive", "{body}");
+    assert_eq!(body["locations"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["channels"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["channels"][0]["channel_id"], 0, "{body}");
+}
+
+/// A zone that does not exist, or an id that is not one, is a 404 rather than
+/// an error page.
+#[tokio::test]
+async fn an_unknown_zone_is_not_found() {
+    let mock = MockZ2m::start(&fixture_path("w07/z2m/server-both.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start(&mock).await;
+
+    for id in [uuid::Uuid::new_v4().to_string(), "not-a-uuid".to_string()] {
+        let (status, body) = fixture
+            .get(&format!("/bifrost/entertainment/configurations/{id}"))
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}: {body}");
+    }
+}
+
 /// The endpoint needs a session like every other read under `/bifrost`.
 #[tokio::test]
 async fn capabilities_needs_a_session() {

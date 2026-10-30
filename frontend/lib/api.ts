@@ -16,6 +16,7 @@ import type { DraftResponse } from './generated/DraftResponse'
 import type { DraftWrite } from './generated/DraftWrite'
 import type { EntertainmentCapabilities } from './generated/EntertainmentCapabilities'
 import type { EntertainmentStatus } from './generated/EntertainmentStatus'
+import type { EntertainmentZone } from './generated/EntertainmentZone'
 import type { IdentityBundle } from './generated/IdentityBundle'
 import type { IdentityMacChange } from './generated/IdentityMacChange'
 import type { IdentityMacChangeReply } from './generated/IdentityMacChangeReply'
@@ -94,6 +95,16 @@ export function baseUrl(): string {
 /** Absolute URL of an admin path, e.g. `config/draft`. */
 export function adminUrl(path: string): string {
   return `${baseUrl()}${ADMIN_PREFIX}/${path.replace(/^\/+/, '')}`
+}
+
+/**
+ * Absolute URL of a CLIP v2 path, e.g. `resource/light`.
+ *
+ * The editor writes zones through this surface, the same one the Hue app
+ * uses: a zone saved here and a zone saved by the app are the same zone.
+ */
+export function clipUrl(path: string): string {
+  return `${baseUrl()}clip/v2/${path.replace(/^\/+/, '')}`
 }
 
 /** WebSocket URL of the admin socket, matching the page's scheme. */
@@ -349,6 +360,77 @@ export class ApiClient {
       body: {},
       csrf: true,
     })
+  }
+
+  /** One zone, with its positions and the channels derived from them. */
+  entertainmentZone(id: string): Promise<EntertainmentZone> {
+    return this.request(`entertainment/configurations/${encodeURIComponent(id)}`)
+  }
+
+  /**
+   * Save a zone's positions and members.
+   *
+   * The write goes through the Hue v2 `PUT`, which is the surface the Hue app
+   * uses, so the editor and the app cannot disagree about what a zone is.
+   */
+  async putZone(id: string, body: unknown): Promise<void> {
+    await this.clip(`resource/entertainment_configuration/${encodeURIComponent(id)}`, 'PUT', body)
+  }
+
+  /** Create a zone, and return its id. */
+  async createZone(body: unknown): Promise<string> {
+    const reply = await this.clip<{ data?: Array<{ rid?: string }> }>(
+      'resource/entertainment_configuration',
+      'POST',
+      body,
+    )
+    const id = reply.data?.[0]?.rid
+    if (id === undefined) {
+      throw new ApiError(0, 'The zone was created but the answer carried no id.')
+    }
+    return id
+  }
+
+  /**
+   * One call on the CLIP v2 surface.
+   *
+   * It is a different error shape from `/bifrost`: a v2 failure carries
+   * `errors[].description`, which is what the Hue app shows, so it is what
+   * the editor shows too.
+   */
+  private async clip<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT' = 'GET',
+    body?: unknown,
+  ): Promise<T> {
+    const headers: Record<string, string> = { accept: 'application/json' }
+    if (body !== undefined) {
+      headers['content-type'] = 'application/json'
+    }
+
+    let response: Response
+    try {
+      response = await fetch(clipUrl(path), {
+        method,
+        headers,
+        credentials: 'same-origin',
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    }
+    catch (cause) {
+      throw new ApiError(0, cause instanceof Error ? cause.message : 'Network request failed')
+    }
+
+    if (!response.ok) {
+      const fallback = `${response.status} ${response.statusText}`.trim()
+      const parsed = await response.json().catch(() => null) as
+        | { errors?: Array<{ description?: string }> }
+        | null
+      const description = parsed?.errors?.[0]?.description
+      throw new ApiError(response.status, description ?? fallback)
+    }
+
+    return (await response.json()) as T
   }
 
   // ---- identity --------------------------------------------------------

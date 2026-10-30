@@ -10,11 +10,7 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 
-const TITLES: Record<string, string> = {
-  devices: 'Devices',
-  rooms: 'Rooms',
-  entertainment: 'Entertainment',
-}
+const TITLES: Record<string, string> = {}
 
 const key = computed(() => String(route.params.slug ?? '').replace(/^\/+/, ''))
 const title = computed(() => TITLES[key.value] ?? 'Not found')

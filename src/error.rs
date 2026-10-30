@@ -175,6 +175,11 @@ pub enum ApiError {
     #[error("Entertainment Stream init error")]
     EntStreamInitError,
 
+    #[error(
+        "More than one entertainment area claims these lights: {0}. Name the area in the stream."
+    )]
+    EntStreamAmbiguous(String),
+
     #[error("Entertainment Stream timeout")]
     EntStreamTimeout,
 

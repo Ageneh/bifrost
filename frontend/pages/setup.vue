@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * First run, in seven steps.
+ * First run, in the steps below.
  *
  * The password comes first and gates everything, so by the time this screen
  * appears the session exists. Every step saves its progress to the wizard's
@@ -8,8 +8,13 @@
  * a half-finished setup is not "unapplied edits" and discarding a draft
  * cannot throw setup away. The draft is written once, at review.
  *
- * The entertainment step is absent on purpose: it arrives with the recipe
- * that fills it, and a step that does nothing is worse than no step.
+ * The step count is never written into copy: it is the length of the list
+ * below, so adding the entertainment step changed one array and nothing else.
+ *
+ * The entertainment step asks the question and records the answer. The zone
+ * itself is created by the recipe on the Entertainment screen after the
+ * bridge has started, because a zone needs devices, and there are none until
+ * this wizard has applied.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useApi } from '~/composables/useApi'
@@ -25,7 +30,7 @@ interface Step {
   why: string
 }
 
-/** The seven steps, in the plan's order. */
+/** The steps, in the plan's order. */
 const STEPS: Step[] = [
   {
     key: 'identity',
@@ -64,10 +69,37 @@ const STEPS: Step[] = [
     why: 'A room is a zigbee2mqtt group. This is skippable; skipping does not keep the wizard alive.',
   },
   {
+    key: 'entertainment',
+    label: 'Entertainment',
+    title: 'A TV or a Sync box?',
+    why: 'A zone is what the TV colours. The recipe that builds it runs once the bridge has started, because it needs the lights this wizard is about to import.',
+  },
+  {
     key: 'review',
     label: 'Review',
     title: 'Review and apply',
     why: 'This writes the configuration once and starts the bridge.',
+  },
+]
+
+/** What the entertainment step answers. */
+type EntertainmentRecipe = 'ambilight' | 'sync-box' | 'none'
+
+const ENTERTAINMENT_CHOICES: Array<{ key: EntertainmentRecipe, label: string, why: string }> = [
+  {
+    key: 'ambilight',
+    label: 'A TV with Ambilight+Hue',
+    why: 'Creates a screen zone over the lights behind the TV.',
+  },
+  {
+    key: 'sync-box',
+    label: 'A Sync box',
+    why: 'Creates a screen zone for its HDMI sources, and reminds you to pair the box.',
+  },
+  {
+    key: 'none',
+    label: 'Not now',
+    why: 'The Entertainment screen offers the same recipes later.',
   },
 ]
 
@@ -100,6 +132,8 @@ const discovered = ref<{ devices: DiscoveredDevice[], rooms: DiscoveredRoom[] } 
 const chosen = ref<string[]>([])
 /** The drafted membership, per group topic. */
 const membership = ref<Record<string, string[]>>({})
+/** The entertainment step's answer, recorded here and used after apply. */
+const entertainmentChoice = ref<EntertainmentRecipe>('none')
 
 const step = computed(() => STEPS[stepIndex.value] ?? STEPS[0]!)
 const isFirst = computed(() => stepIndex.value === 0)
@@ -137,7 +171,7 @@ function values(): Record<string, unknown> {
     rooms[topic] = { devices: ieees }
   }
 
-  return { bridge: bridge.value, z2m, devices, rooms }
+  return { bridge: bridge.value, z2m, devices, rooms, entertainment: { recipe: entertainmentChoice.value } }
 }
 
 async function load(): Promise<void> {
@@ -148,6 +182,7 @@ async function load(): Promise<void> {
       z2m?: Record<string, { url?: string, token?: string }>
       devices?: Record<string, { enabled?: boolean }>
       rooms?: Record<string, { devices?: string[] }>
+      entertainment?: { recipe?: EntertainmentRecipe }
     }
 
     if (held.bridge) {
@@ -171,6 +206,10 @@ async function load(): Promise<void> {
       membership.value = Object.fromEntries(
         Object.entries(held.rooms).map(([topic, settings]) => [topic, settings.devices ?? []]),
       )
+    }
+
+    if (held.entertainment?.recipe !== undefined) {
+      entertainmentChoice.value = held.entertainment.recipe
     }
 
     const at = STEPS.findIndex(entry => entry.key === progress.step)
@@ -254,6 +293,14 @@ function document(): Record<string, unknown> {
   }
 }
 
+/** The entertainment answer, as review states it. */
+const entertainmentLine = computed(() => {
+  const choice = ENTERTAINMENT_CHOICES.find(entry => entry.key === entertainmentChoice.value)
+  return entertainmentChoice.value === 'none'
+    ? 'No entertainment zone yet; the Entertainment screen offers the recipes.'
+    : `Entertainment: ${choice?.label ?? entertainmentChoice.value}, from the Entertainment screen after the first start.`
+})
+
 /** The lines review shows before anything is written. */
 const summary = computed(() => {
   const lines = [
@@ -261,6 +308,7 @@ const summary = computed(() => {
     serverUrl.value === '' ? 'No zigbee2mqtt server' : `zigbee2mqtt at ${serverUrl.value}`,
     `${chosen.value.length} light${chosen.value.length === 1 ? '' : 's'} served`,
     `${Object.keys(membership.value).length} room${Object.keys(membership.value).length === 1 ? '' : 's'}`,
+    entertainmentLine.value,
   ]
   return lines
 })
@@ -558,6 +606,31 @@ onMounted(load)
               >
               <span>{{ device.friendly_name }}</span>
             </label>
+          </div>
+        </template>
+
+        <template v-else-if="step.key === 'entertainment'">
+          <div
+            class="fd-stack"
+            data-testid="wizard-entertainment"
+          >
+            <label
+              v-for="choice in ENTERTAINMENT_CHOICES"
+              :key="choice.key"
+              class="fd-field fd-field--row"
+            >
+              <input
+                v-model="entertainmentChoice"
+                type="radio"
+                name="entertainment"
+                :value="choice.key"
+                :data-testid="`wizard-entertainment-${choice.key}`"
+              >
+              <span class="fd-value">{{ choice.label }}</span>
+            </label>
+            <div class="fd-panel__sub">
+              {{ ENTERTAINMENT_CHOICES.find(entry => entry.key === entertainmentChoice)?.why }}
+            </div>
           </div>
         </template>
 
