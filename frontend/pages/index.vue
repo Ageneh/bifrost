@@ -18,6 +18,7 @@ import DiffDrawer from '~/components/DiffDrawer.vue'
 import HealthStrip from '~/components/HealthStrip.vue'
 import { useApi } from '~/composables/useApi'
 import { useDraft } from '~/composables/useDraft'
+import { useInventory } from '~/composables/useInventory'
 import { useLiveSocket } from '~/composables/useLiveSocket'
 import { useToast } from '~/composables/useToast'
 import type { AppConfig } from '~/lib/generated/AppConfig'
@@ -28,6 +29,7 @@ import { deriveAttention, deriveHealth } from '~/lib/doctor'
 const { client } = useApi()
 const socket = useLiveSocket()
 const draft = useDraft()
+const inventory = useInventory()
 const toast = useToast()
 
 const config = ref<AppConfig | null>(null)
@@ -117,6 +119,11 @@ const quickActions = computed<QuickAction[]>(() => {
     actions.push({ id: 'review', label: 'Review draft', run: openDraft })
   }
   actions.push({ id: 'bridge', label: 'Bridge settings', run: openBridge })
+  // pairing belongs here as well as on the Devices head, but it is never
+  // more urgent than a draft or a restart, so it queues behind them
+  if (runningServer.value !== undefined) {
+    actions.push({ id: 'pair', label: 'Pair a device', run: pairDevice })
+  }
   return actions.slice(0, 3)
 })
 
@@ -168,6 +175,7 @@ onMounted(async () => {
   })
   await load()
   await draft.load()
+  await inventory.refresh()
 })
 
 onBeforeUnmount(() => {
@@ -226,6 +234,27 @@ async function restartBridge(): Promise<void> {
 
 function openBridge(): void {
   void navigateTo('/system/bridge')
+}
+
+/** The z2m server a join window would be opened on. */
+const runningServer = computed(
+  () => inventory.servers.value.find(server => server.online)?.name,
+)
+
+/** Open a join window on the running server, so a new device can join. */
+async function pairDevice(): Promise<void> {
+  const target = runningServer.value
+  if (target === undefined) {
+    toast.fail('No z2m server is running, so nothing can be paired.')
+    return
+  }
+  try {
+    const window = await inventory.permitJoin(target)
+    toast.ok(`Join window open on ${target} for ${window.time} seconds.`)
+  }
+  catch (cause) {
+    toast.fail(cause instanceof Error ? cause.message : 'The join window did not open.')
+  }
 }
 
 function runAction(item: AttentionItem): void {

@@ -9,12 +9,16 @@
 import type { ApplyResponse } from './generated/ApplyResponse'
 import type { ConfigChange } from './generated/ConfigChange'
 import type { ConfigImport } from './generated/ConfigImport'
+import type { DeviceInfo } from './generated/DeviceInfo'
 import type { DraftPatch } from './generated/DraftPatch'
 import type { DraftResponse } from './generated/DraftResponse'
 import type { DraftWrite } from './generated/DraftWrite'
+import type { InventorySnapshot } from './generated/InventorySnapshot'
 import type { LoginRequest } from './generated/LoginRequest'
 import type { LogoutRequest } from './generated/LogoutRequest'
 import type { PasswordChange } from './generated/PasswordChange'
+import type { PermitJoinRequest } from './generated/PermitJoinRequest'
+import type { PermitJoinResponse } from './generated/PermitJoinResponse'
 import type { RestartRequest } from './generated/RestartRequest'
 import type { RevisionRequest } from './generated/RevisionRequest'
 import type { ServiceList } from './generated/ServiceList'
@@ -213,6 +217,39 @@ export class ApiClient {
     return this.request('config/import', { method: 'POST', body, csrf: true })
   }
 
+  // ---- devices ---------------------------------------------------------
+
+  /** Every device the bridge knows, optionally narrowed by the server. */
+  devices(query: DeviceQuery = {}): Promise<InventorySnapshot> {
+    return this.request(`devices${queryString({ ...query })}`)
+  }
+
+  device(ieee: string, server?: string): Promise<DeviceInfo> {
+    return this.request(`devices/${encodeURIComponent(ieee)}${queryString({ server })}`)
+  }
+
+  /** Flash one device so a person can tell which bulb it is. */
+  identifyDevice(ieee: string, server: string, seconds = 5): Promise<DeviceInfo> {
+    return this.request(
+      `devices/${encodeURIComponent(ieee)}/identify${queryString({ server })}`,
+      { method: 'POST', body: { seconds }, csrf: true },
+    )
+  }
+
+  /** Open a server's join window. */
+  permitJoin(server: string, body: Partial<PermitJoinRequest> = {}): Promise<PermitJoinResponse> {
+    return this.request(`z2m/${encodeURIComponent(server)}/permit_join`, {
+      method: 'POST',
+      body,
+      csrf: true,
+    })
+  }
+
+  /** Seconds left in a server's join window; zero when none is open. */
+  permitJoinStatus(server: string): Promise<PermitJoinResponse> {
+    return this.request(`z2m/${encodeURIComponent(server)}/permit_join`)
+  }
+
   // ---- services --------------------------------------------------------
 
   services(): Promise<ServiceList> {
@@ -226,6 +263,21 @@ export class ApiClient {
       csrf: true,
     })
   }
+}
+
+/** What the device list may be narrowed by. */
+export interface DeviceQuery {
+  server?: string
+  type?: string
+  supported?: boolean
+}
+
+/** `?a=1&b=2`, with the empty parts left out. */
+function queryString(query: Record<string, string | boolean | undefined>): string {
+  const parts = Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+  return parts.length === 0 ? '' : `?${parts.join('&')}`
 }
 
 /** The client every composable shares, so the CSRF token is one value. */

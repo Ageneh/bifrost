@@ -60,6 +60,84 @@ const ACTIVE_CONFIG = {
   rooms: { office: { name: 'Office', icon: 'office' } },
 }
 
+/** The device inventory, as the API returns it. */
+const SERVERS = [
+  {
+    name: 'office',
+    online: true,
+    permit_join: { time: 0, device: null, opened_at: null },
+    last_seen: '2026-10-30T09:00:00Z',
+  },
+  {
+    name: 'garage',
+    online: false,
+    permit_join: { time: 0, device: null, opened_at: null },
+    last_seen: '2026-10-30T08:00:00Z',
+  },
+]
+
+function device(server, ieee, name, type, supported, overrides = {}) {
+  return {
+    server,
+    ieee,
+    friendly_name: name,
+    model: 'LCT015',
+    vendor: 'Signify',
+    description: null,
+    device_type: type,
+    supported,
+    unsupported_reason: supported ? null : 'Bifrost has no Hue mapping for plugs',
+    exposes: [{ property: 'state', kind: 'binary', access: 7, unit: null, values: ['ON', 'OFF'] }],
+    capabilities: {
+      dimmable: supported,
+      color: supported,
+      color_temperature: supported,
+      gradient: false,
+      effects: false,
+      motion: type === 'motion',
+      temperature: false,
+      illuminance: false,
+      contact: type === 'contact',
+      action: false,
+    },
+    availability: 'online',
+    resources: [{ rid: `device-${ieee}`, rtype: 'device' }],
+    room: null,
+    group: null,
+    last_seen: '2026-10-30T09:00:00Z',
+    ...overrides,
+  }
+}
+
+const DEVICES = [
+  device('office', '0x0017880100000001', 'Kitchen ceiling', 'light', true, {
+    room: { rid: 'room-kitchen', name: 'Kitchen' },
+    group: { id: 1, name: 'Kitchen' },
+  }),
+  // in a group but in no room: the chain breaks at the room hop
+  device('office', '0x0017880100000002', 'Hall lamp', 'light', true, {
+    group: { id: 2, name: 'Hall' },
+  }),
+  device('office', '0x00158d0000000010', 'Desk plug', 'plug', false),
+  device('office', '0x00158d0000000050', 'Back door', 'contact', false),
+  // its server is not running: the chain breaks at the z2m hop
+  device('garage', '0x00158d0000000020', 'Hall motion', 'motion', false, {
+    availability: 'unknown',
+  }),
+]
+
+/** The devices the query leaves, as the API filters them. */
+function filteredDevices(search) {
+  const server = search.get('server')
+  const type = search.get('type')
+  const supported = search.get('supported')
+
+  return DEVICES
+    .filter(entry => !server || entry.server === server)
+    .filter(entry => !type || entry.device_type === type)
+    .filter(entry => supported === null || String(entry.supported) === supported)
+}
+
 const SERVICES = {
   services: {
     '11111111-1111-4111-8111-111111111111': {
@@ -221,8 +299,41 @@ async function sendShell(response) {
 }
 
 /** Every `/bifrost/*` endpoint the console uses, by method and path. */
-async function handleApi(request, response, endpoint) {
+async function handleApi(request, response, endpoint, search) {
   const method = request.method ?? 'GET'
+
+  if (endpoint === 'devices' && method === 'GET') {
+    return sendJson(response, {
+      servers: SERVERS,
+      devices: filteredDevices(search),
+      updated: '2026-10-30T09:00:00Z',
+    })
+  }
+
+  if (endpoint.startsWith('devices/') && method === 'GET') {
+    const ieee = decodeURIComponent(endpoint.slice('devices/'.length))
+    const found = DEVICES.find(entry => entry.ieee === ieee)
+    return found
+      ? sendJson(response, found)
+      : send(response, 404, JSON.stringify({ error: 'No such device', errors: [] }))
+  }
+
+  if (endpoint.startsWith('devices/') && endpoint.endsWith('/identify') && method === 'POST') {
+    const ieee = decodeURIComponent(endpoint.slice('devices/'.length, -'/identify'.length))
+    const found = DEVICES.find(entry => entry.ieee === ieee)
+    return found
+      ? sendJson(response, found)
+      : send(response, 404, JSON.stringify({ error: 'No such device', errors: [] }))
+  }
+
+  if (endpoint.startsWith('z2m/') && endpoint.endsWith('/permit_join')) {
+    const name = decodeURIComponent(endpoint.slice('z2m/'.length, -'/permit_join'.length))
+    if (method === 'POST') {
+      const body = (await readJson(request)) ?? {}
+      return sendJson(response, { server: name, time: body.time ?? 60, device: body.device ?? null })
+    }
+    return sendJson(response, { server: name, time: 0, device: null })
+  }
 
   if (endpoint === 'auth/session') {
     return sendJson(response, {
@@ -307,7 +418,7 @@ const server = createServer(async (request, response) => {
   if (rest.startsWith('bifrost/')) {
     const endpoint = rest.slice('bifrost/'.length).replace(/\/+$/, '')
     try {
-      return await handleApi(request, response, endpoint)
+      return await handleApi(request, response, endpoint, url.searchParams)
     }
     catch (error) {
       return send(response, 500, JSON.stringify({ error: String(error), errors: [] }))

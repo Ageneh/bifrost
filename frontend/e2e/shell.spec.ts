@@ -42,10 +42,14 @@ test.describe('the console shell at 390 px', () => {
       await expect(page.getByTestId(`nav-${key}`)).toBeVisible()
     }
 
-    // a lazy route chunk loads through the relative asset base
+    // a lazy route chunk loads through the relative asset base; Devices has
+    // its own screen since wave 4, and the modes after it still say pending
     await page.getByTestId('nav-devices').click()
+    await expect(page.getByTestId('device-table')).toBeVisible()
+
+    await page.getByTestId('nav-rooms').click()
     await expect(page.getByTestId('pending-screen')).toBeVisible()
-    await expect(page.getByTestId('pending-screen')).toContainText('Devices')
+    await expect(page.getByTestId('pending-screen')).toContainText('Rooms')
   })
 
   test('shows the draft pill and hides the status-column bar', async ({ page }) => {
