@@ -13,6 +13,7 @@ use crate::auth::{Auth, HashCost, SystemClock};
 use crate::config::AppConfig;
 use crate::config_store::ConfigStore;
 use crate::error::ApiResult;
+use crate::inventory::Inventory;
 use crate::model::state::{State, StateVersion};
 use crate::resource::Resources;
 use crate::server::certificate;
@@ -25,6 +26,7 @@ pub struct AppState {
     svm: SvmClient,
     auth: Arc<Auth>,
     pub res: Arc<Mutex<Resources>>,
+    inventory: Arc<Inventory>,
 }
 
 impl AppState {
@@ -89,7 +91,14 @@ impl AppState {
             svm,
             auth,
             res,
+            inventory: Inventory::new(),
         })
+    }
+
+    /// The device registry every z2m backend publishes into.
+    #[must_use]
+    pub fn inventory(&self) -> Arc<Inventory> {
+        self.inventory.clone()
     }
 
     /// Replace the authentication state, e.g. with one on a test clock.

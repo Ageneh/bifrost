@@ -35,6 +35,7 @@ use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
+use crate::inventory::{GroupRef, Inventory};
 use crate::model::throttle::Throttle;
 use crate::resource::Resources;
 use crate::server::appstate::AppState;
@@ -68,7 +69,8 @@ impl ServiceTemplate for Z2mServiceTemplate {
             self.state.store(),
             self.state.res.clone(),
         )
-        .map_err(SvcError::generation)?;
+        .map_err(SvcError::generation)?
+        .with_inventory(self.state.inventory());
 
         Ok(svc.boxed())
     }
@@ -84,11 +86,18 @@ pub struct Z2mBackend {
     learner: SceneLearn,
     ignore: HashSet<String>,
     network: HashMap<String, z2m::api::Device>,
+    /// The z2m group each device belongs to, by IEEE address.
+    group_of: HashMap<String, GroupRef>,
+    /// The id of each z2m group, by friendly name.
+    group_ids: HashMap<String, u32>,
     entstream: Option<EntStream>,
     counter: u32,
     fps: u32,
     throttle: Throttle,
     socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    /// Where what this backend learns is published. Absent in a unit test
+    /// that drives the backend without one.
+    inventory: Option<Arc<Inventory>>,
 
     // for sending delayed messages over the websocket
     message_rx: mpsc::UnboundedReceiver<(String, DeviceUpdate)>,
@@ -111,6 +120,8 @@ impl Z2mBackend {
         let ignore = HashSet::new();
         let learner = SceneLearn::new(name.clone());
         let network = HashMap::new();
+        let group_of = HashMap::new();
+        let group_ids = HashMap::new();
         let entstream = None;
         let throttle = Throttle::from_fps(fps);
         let (message_tx, message_rx) = mpsc::unbounded_channel();
@@ -124,6 +135,8 @@ impl Z2mBackend {
             learner,
             ignore,
             network,
+            group_of,
+            group_ids,
             entstream,
             throttle,
             fps,
@@ -131,7 +144,23 @@ impl Z2mBackend {
             message_tx,
             socket: None,
             counter: 0,
+            inventory: None,
         })
+    }
+
+    /// Publish what this backend learns into `inventory`.
+    ///
+    /// A separate step rather than another argument to [`Self::new`]: the
+    /// constructor stays about the server's own configuration.
+    #[must_use]
+    pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
+        self.inventory = Some(inventory);
+        self
+    }
+
+    /// The registry this backend publishes into, when it has one.
+    pub(crate) const fn inventory(&self) -> Option<&Arc<Inventory>> {
+        self.inventory.as_ref()
     }
 
     pub async fn event_loop(
@@ -223,11 +252,22 @@ impl Service for Z2mBackend {
 
     async fn run(&mut self) -> ApiResult<()> {
         if let Some(socket) = self.socket.take() {
+            let inventory = self.inventory.clone();
+            if let Some(inventory) = &inventory {
+                inventory.server_up(&self.name);
+            }
+
             let z2m_socket = Z2mWebSocket::new(self.name.clone(), socket);
             let mut chan = self.state.lock().await.backend_event_stream();
             let res = self.event_loop(&mut chan, z2m_socket).await;
             if let Err(err) = res {
                 log::error!("[{}] Event loop broke: {err}", self.name);
+            }
+
+            // a backend that stopped is not gone: its devices stay listed,
+            // but nothing is known to be reachable any more
+            if let Some(inventory) = &inventory {
+                inventory.server_down(&self.name);
             }
         }
         Ok(())
@@ -235,6 +275,9 @@ impl Service for Z2mBackend {
 
     async fn stop(&mut self) -> ApiResult<()> {
         self.socket.take();
+        if let Some(inventory) = &self.inventory {
+            inventory.server_down(&self.name);
+        }
         Ok(())
     }
 }
