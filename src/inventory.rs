@@ -474,20 +474,20 @@ impl Inventory {
         server.online = false;
         self.set_server(server);
 
-        let stale: Vec<DeviceInfo> = {
+        let changed: Vec<DeviceInfo> = {
             let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-            let mut stale = vec![];
-            for device in state.devices.values_mut() {
-                if device.server == name && device.availability != Availability::Unknown {
-                    device.availability = Availability::Unknown;
-                    stale.push(device.clone());
+            let mut changed = vec![];
+            for entry in state.devices.values_mut() {
+                if entry.server == name && entry.availability != Availability::Unknown {
+                    entry.availability = Availability::Unknown;
+                    changed.push(entry.clone());
                 }
             }
             state.updated = Utc::now();
-            stale
+            changed
         };
 
-        for device in stale {
+        for device in changed {
             self.publish(InventoryEvent::Device(Box::new(device)));
         }
     }
@@ -557,8 +557,8 @@ pub fn from_z2m(
         device_type,
         supported,
         unsupported_reason,
-        exposes: vec![],
-        capabilities: Capabilities::default(),
+        exposes: expose_summaries(device),
+        capabilities: capabilities(device),
         availability: previous.map_or(Availability::Unknown, |prev| prev.availability),
         resources,
         room: previous.and_then(|prev| prev.room.clone()),
@@ -567,11 +567,62 @@ pub fn from_z2m(
     }
 }
 
+/// Why a device of a class Bifrost does not serve is still listed.
+const SENSOR_REASON: &str =
+    "Sensor values arrive in a later wave; the device is listed but not served over the Hue API";
+
 /// The class of `device`, whether Bifrost can serve it, and why not.
+///
+/// The classes are the ones the board agreed on. A class Bifrost cannot
+/// serve says why, in the record, rather than being left out of the
+/// inventory: an invisible device is the thing this wave exists to stop.
 #[must_use]
 pub fn classify(device: &z2m::api::Device) -> (DeviceType, bool, Option<String>) {
+    let exposes = flatten(device.exposes());
+    let has = |property: &str| exposes.iter().any(|exp| names(exp, property));
+
     if device.expose_light().is_some() {
         return (DeviceType::Light, true, None);
+    }
+
+    if has("action") {
+        return (
+            DeviceType::Remote,
+            false,
+            Some("A remote has no Hue equivalent; its button events are not served".to_string()),
+        );
+    }
+
+    if exposes
+        .iter()
+        .any(|exp| matches!(exp, z2m::api::Expose::Switch(_)))
+    {
+        return (
+            DeviceType::Plug,
+            false,
+            Some("Bifrost has no Hue mapping for plugs".to_string()),
+        );
+    }
+
+    // a sensor that reports motion is a motion sensor, whatever else it also
+    // reports
+    let sensor = if has("occupancy") || has("motion") {
+        Some(DeviceType::Motion)
+    } else if has("temperature") {
+        Some(DeviceType::Temperature)
+    } else if has("illuminance") {
+        Some(DeviceType::Illuminance)
+    } else if has("contact") {
+        Some(DeviceType::Contact)
+    } else {
+        None
+    };
+    if let Some(sensor) = sensor {
+        return (sensor, false, Some(SENSOR_REASON.to_string()));
+    }
+
+    if let Some(out_of_scope) = out_of_scope_class(&exposes) {
+        return (DeviceType::Other, false, Some(out_of_scope.to_string()));
     }
 
     (
@@ -579,6 +630,126 @@ pub fn classify(device: &z2m::api::Device) -> (DeviceType, bool, Option<String>)
         false,
         Some("Bifrost has no Hue mapping for this device".to_string()),
     )
+}
+
+/// The reason for a device class the board ruled out of scope.
+fn out_of_scope_class(exposes: &[&z2m::api::Expose]) -> Option<&'static str> {
+    for expose in exposes {
+        let reason = match expose {
+            z2m::api::Expose::Cover(_) => "Covers are out of scope by board decision",
+            z2m::api::Expose::Climate(_) => "Climate devices are out of scope by board decision",
+            z2m::api::Expose::Fan(_) => "Fans are out of scope by board decision",
+            z2m::api::Expose::Lock(_) => "Locks are out of scope by board decision",
+            _ => continue,
+        };
+        return Some(reason);
+    }
+    None
+}
+
+/// What the device can do, as far as its exposes say.
+#[must_use]
+pub fn capabilities(device: &z2m::api::Device) -> Capabilities {
+    let exposes = flatten(device.exposes());
+    let has = |property: &str| exposes.iter().any(|exp| names(exp, property));
+
+    Capabilities {
+        dimmable: has("brightness"),
+        color: has("color_xy") || has("color_hs"),
+        color_temperature: has("color_temp"),
+        gradient: device.expose_gradient().is_some(),
+        effects: has("effect"),
+        motion: has("occupancy") || has("motion"),
+        temperature: has("temperature"),
+        illuminance: has("illuminance"),
+        contact: has("contact"),
+        action: has("action"),
+    }
+}
+
+/// Every expose of a device, features included, in the order z2m lists them.
+#[must_use]
+pub fn expose_summaries(device: &z2m::api::Device) -> Vec<ExposeSummary> {
+    flatten(device.exposes())
+        .into_iter()
+        .filter_map(|expose| {
+            let base = expose.base();
+            let property = base.property.clone()?;
+            Some(ExposeSummary {
+                property,
+                kind: kind_of(expose).to_string(),
+                access: base.access,
+                unit: unit_of(expose),
+                values: values_of(expose),
+            })
+        })
+        .collect()
+}
+
+/// A device's exposes with every nested feature flattened in.
+fn flatten(exposes: &[z2m::api::Expose]) -> Vec<&z2m::api::Expose> {
+    let mut out = Vec::new();
+    let mut pending: Vec<&z2m::api::Expose> = exposes.iter().rev().collect();
+    while let Some(expose) = pending.pop() {
+        out.push(expose);
+        pending.extend(expose.base().features.iter().rev());
+    }
+    out
+}
+
+/// Whether `expose` carries the z2m property `property`.
+fn names(expose: &z2m::api::Expose, property: &str) -> bool {
+    expose.base().property.as_deref() == Some(property)
+}
+
+/// The z2m type name of an expose.
+const fn kind_of(expose: &z2m::api::Expose) -> &'static str {
+    use z2m::api::Expose;
+    match expose {
+        Expose::Binary(_) => "binary",
+        Expose::Composite(_) => "composite",
+        Expose::Enum(_) => "enum",
+        Expose::Light(_) => "light",
+        Expose::Lock(_) => "lock",
+        Expose::Numeric(_) => "numeric",
+        Expose::Switch(_) => "switch",
+        Expose::List(_) => "list",
+        Expose::Text(_) => "text",
+        Expose::Cover(_) => "cover",
+        Expose::Fan(_) => "fan",
+        Expose::Climate(_) => "climate",
+    }
+}
+
+/// The unit a numeric expose is measured in.
+fn unit_of(expose: &z2m::api::Expose) -> Option<String> {
+    match expose {
+        z2m::api::Expose::Numeric(numeric) => numeric.unit.clone(),
+        _ => None,
+    }
+}
+
+/// The values an enum or binary expose accepts.
+fn values_of(expose: &z2m::api::Expose) -> Vec<String> {
+    match expose {
+        z2m::api::Expose::Enum(enumeration) => {
+            enumeration.values.iter().map(display_value).collect()
+        }
+        z2m::api::Expose::Binary(binary) => {
+            vec![
+                display_value(&binary.value_on),
+                display_value(&binary.value_off),
+            ]
+        }
+        _ => vec![],
+    }
+}
+
+/// A JSON value as the string the wire carries.
+fn display_value(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map_or_else(|| value.to_string(), str::to_string)
 }
 
 /// The Hue resources a device owns, as far as its address decides them.
@@ -609,7 +780,163 @@ fn resource_refs(device: &z2m::api::Device, supported: bool) -> Vec<ResourceRef>
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    /// A z2m device record with the exposes `exposes` and nothing else.
+    fn z2m_device(exposes: &serde_json::Value) -> z2m::api::Device {
+        let device = json!({
+            "description": null,
+            "disabled": false,
+            "endpoints": {},
+            "friendly_name": "Lamp",
+            "ieee_address": "0x0017880100000001",
+            "interview_completed": true,
+            "interviewing": false,
+            "manufacturer": "Signify",
+            "model_id": "LCT001",
+            "network_address": 1234,
+            "type": "Router",
+            "definition": {
+                "model": "LCT001",
+                "vendor": "Signify",
+                "description": "Hue white and color",
+                "exposes": exposes,
+                "options": [],
+                "supports_ota": false,
+            },
+        });
+        // parsed from text, not a `Value`: the IEEE address deserializer
+        // borrows the string it reads
+        serde_json::from_str(&device.to_string()).unwrap()
+    }
+
+    fn classified(exposes: &serde_json::Value) -> (DeviceType, bool, Option<String>) {
+        classify(&z2m_device(exposes))
+    }
+
+    #[test]
+    fn a_light_is_the_one_class_bifrost_serves() {
+        let (device_type, supported, reason) = classified(&json!([{
+            "type": "light",
+            "features": [
+                {"type": "numeric", "property": "brightness", "access": 7},
+                {"type": "numeric", "property": "color_temp", "access": 7},
+                {"type": "composite", "property": "color_xy", "access": 7},
+            ],
+        }]));
+
+        assert_eq!(device_type, DeviceType::Light);
+        assert!(supported);
+        assert_eq!(reason, None);
+
+        let capabilities = capabilities(&z2m_device(&json!([{
+            "type": "light",
+            "features": [
+                {"type": "numeric", "property": "brightness", "access": 7},
+                {"type": "numeric", "property": "color_temp", "access": 7},
+                {"type": "composite", "property": "color_xy", "access": 7},
+            ],
+        }])));
+        assert!(capabilities.dimmable);
+        assert!(capabilities.color_temperature);
+        assert!(capabilities.color);
+        assert!(!capabilities.motion);
+    }
+
+    #[test]
+    fn a_switch_is_a_plug_and_says_it_is_not_served() {
+        let (device_type, supported, reason) =
+            classified(&json!([{"type": "switch", "property": "state", "access": 7}]));
+
+        assert_eq!(device_type, DeviceType::Plug);
+        assert!(!supported);
+        assert!(reason.unwrap().contains("plugs"));
+    }
+
+    #[test]
+    fn every_sensor_class_is_recognised_and_explained() {
+        let cases = [
+            (
+                json!([{"type": "binary", "property": "occupancy", "access": 1, "value_on": true, "value_off": false}]),
+                DeviceType::Motion,
+            ),
+            (
+                json!([{"type": "numeric", "property": "temperature", "access": 1, "unit": "°C"}]),
+                DeviceType::Temperature,
+            ),
+            (
+                json!([{"type": "numeric", "property": "illuminance", "access": 1, "unit": "lx"}]),
+                DeviceType::Illuminance,
+            ),
+            (
+                json!([{"type": "binary", "property": "contact", "access": 1, "value_on": false, "value_off": true}]),
+                DeviceType::Contact,
+            ),
+        ];
+
+        for (exposes, expected) in cases {
+            let (device_type, supported, reason) = classified(&exposes);
+            assert_eq!(device_type, expected);
+            assert!(!supported);
+            assert!(reason.unwrap().contains("later wave"));
+        }
+    }
+
+    #[test]
+    fn a_remote_is_recognised_by_its_action_property() {
+        let (device_type, supported, reason) = classified(&json!([
+            {"type": "enum", "property": "action", "access": 1, "values": ["on", "off"]}
+        ]));
+
+        assert_eq!(device_type, DeviceType::Remote);
+        assert!(!supported);
+        assert!(reason.unwrap().contains("remote"));
+    }
+
+    #[test]
+    fn an_out_of_scope_class_says_so_instead_of_disappearing() {
+        for (exposes, needle) in [
+            (json!([{"type": "cover", "property": "state"}]), "Covers"),
+            (
+                json!([{"type": "climate", "property": "system_mode"}]),
+                "Climate",
+            ),
+            (json!([{"type": "fan", "property": "state"}]), "Fans"),
+            (json!([{"type": "lock", "property": "state"}]), "Locks"),
+        ] {
+            let (device_type, supported, reason) = classified(&exposes);
+            assert_eq!(device_type, DeviceType::Other);
+            assert!(!supported);
+            assert!(reason.unwrap().contains(needle));
+        }
+    }
+
+    #[test]
+    fn the_light_classification_is_what_makes_a_device_supported() {
+        // the deliberate flip: the same record, once as a light and once as a
+        // switch, must land on opposite sides of `supported`
+        let light = z2m_device(&json!([{"type": "light", "features": []}]));
+        let switch = z2m_device(&json!([{"type": "switch", "property": "state", "access": 7}]));
+
+        assert!(classify(&light).1);
+        assert!(!classify(&switch).1);
+    }
+
+    #[test]
+    fn exposes_are_summarised_with_their_unit_and_values() {
+        let device = z2m_device(&json!([
+            {"type": "numeric", "property": "temperature", "access": 1, "unit": "°C"},
+            {"type": "enum", "property": "action", "access": 1, "values": ["on", "off"]},
+        ]));
+
+        let summaries = expose_summaries(&device);
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].property, "temperature");
+        assert_eq!(summaries[0].unit.as_deref(), Some("°C"));
+        assert_eq!(summaries[1].values, ["on", "off"]);
+    }
 
     fn device(server: &str, ieee: &str, name: &str) -> DeviceInfo {
         DeviceInfo {
