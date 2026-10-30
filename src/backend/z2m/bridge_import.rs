@@ -6,11 +6,12 @@ use serde_json::json;
 use uuid::Uuid;
 
 use hue::api::{
-    BridgeHome, Button, ButtonData, ButtonMetadata, ButtonReport, DeviceArchetype,
-    DeviceProductData, Entertainment, EntertainmentSegment, EntertainmentSegments, GroupedLight,
-    Light, LightEffects, LightEffectsV2, LightMetadata, Metadata, RType, Resource, ResourceLink,
-    Room, RoomArchetype, RoomMetadata, Scene, SceneActive, SceneMetadata, SceneRecall, SceneStatus,
-    Stub, Taurus, ZigbeeConnectivity, ZigbeeConnectivityStatus,
+    BridgeHome, Button, ButtonData, ButtonMetadata, ButtonReport, Contact, DeviceArchetype,
+    DevicePower, DeviceProductData, Entertainment, EntertainmentSegment, EntertainmentSegments,
+    GroupedLight, Light, LightEffects, LightEffectsV2, LightLevel, LightMetadata, Metadata, Motion,
+    RType, Resource, ResourceLink, Room, RoomArchetype, RoomMetadata, Scene, SceneActive,
+    SceneMetadata, SceneRecall, SceneStatus, Stub, Taurus, Temperature, ZigbeeConnectivity,
+    ZigbeeConnectivityStatus,
 };
 use hue::scene_icons;
 use z2m::api::ExposeLight;
@@ -20,6 +21,7 @@ use z2m::convert::{
 };
 
 use crate::backend::z2m::Z2mBackend;
+use crate::backend::z2m::sensor::{self, SensorKind};
 use crate::error::ApiResult;
 use crate::model::state::AuxData;
 
@@ -63,9 +65,9 @@ impl Z2mBackend {
             usertest: None,
         };
 
-        self.map.insert(name.to_string(), link_light);
-        self.rmap.insert(link_device, name.to_string());
-        self.rmap.insert(link_light, name.to_string());
+        self.map.insert(name.clone(), link_light);
+        self.rmap.insert(link_device, name.clone());
+        self.rmap.insert(link_light, name.clone());
 
         let mut light = Light::new(link_device, metadata.clone());
 
@@ -167,6 +169,86 @@ impl Z2mBackend {
         Ok(())
     }
 
+    /// Import one sensor or remote: the `Device`, the resource its class
+    /// owns, and the two companions every battery-powered device has.
+    ///
+    /// The companions are not optional. A Hue client that finds a `motion`
+    /// resource with no `device_power` beside it either hides the sensor or
+    /// shows it without a battery, and that is the failure mode this import
+    /// exists to prevent.
+    #[allow(clippy::too_many_lines)]
+    pub async fn add_sensor(
+        &mut self,
+        apidev: &z2m::api::Device,
+        kind: SensorKind,
+    ) -> ApiResult<()> {
+        let name = &apidev.friendly_name;
+        let ieee = apidev.ieee_address.to_string();
+
+        let override_name = self
+            .store
+            .active()
+            .device(&ieee)
+            .and_then(|device| device.name.clone());
+        let shown_name = override_name.unwrap_or_else(|| name.clone());
+
+        let link_device = RType::Device.deterministic(&apidev.ieee_address);
+        let link_zigcon = RType::ZigbeeConnectivity.deterministic(&apidev.ieee_address);
+        let link_power = RType::DevicePower.deterministic(&apidev.ieee_address);
+        let link_service = match kind {
+            SensorKind::Motion => RType::Motion.deterministic(&apidev.ieee_address),
+            SensorKind::Temperature => RType::Temperature.deterministic(&apidev.ieee_address),
+            SensorKind::Illuminance => RType::LightLevel.deterministic(&apidev.ieee_address),
+            SensorKind::Contact => RType::Contact.deterministic(&apidev.ieee_address),
+            SensorKind::Remote => RType::Button.deterministic(&apidev.ieee_address),
+        };
+
+        let metadata = Metadata::new(DeviceArchetype::UnknownArchetype, &shown_name);
+        let dev = hue::api::Device {
+            product_data: DeviceProductData::guess_from_device(apidev),
+            metadata: metadata.clone(),
+            services: btreeset![link_zigcon, link_power, link_service],
+            identify: None,
+            usertest: None,
+        };
+
+        // the topic is the key every update arrives on; the resource is what
+        // it becomes
+        self.map.insert(name.clone(), link_service);
+        self.rmap.insert(link_device, name.clone());
+        self.rmap.insert(link_service, name.clone());
+
+        let power = DevicePower {
+            owner: link_device,
+            power_state: sensor::power_state(None),
+        };
+        let zigcon = ZigbeeConnectivity {
+            channel: None,
+            extended_pan_id: None,
+            mac_address: apidev.ieee_address.to_string(),
+            owner: link_device,
+            status: ZigbeeConnectivityStatus::Connected,
+        };
+
+        let mut res = self.state.lock().await;
+        res.aux_set(&link_service, AuxData::new().with_topic(name));
+        res.add(&link_device, Resource::Device(dev))?;
+        res.add(&link_zigcon, Resource::ZigbeeConnectivity(zigcon))?;
+        res.add(&link_power, Resource::DevicePower(power))?;
+
+        let initial = initial_resource(kind, link_device);
+        res.add(&link_service, initial)?;
+
+        // a device that is already known keeps its id and its readings, so a
+        // re-import is an update of the name rather than a new sensor
+        res.update(&link_device.rid, |known: &mut hue::api::Device| {
+            known.metadata = metadata;
+        })?;
+        drop(res);
+
+        Ok(())
+    }
+
     pub async fn add_switch(&mut self, dev: &z2m::api::Device) -> ApiResult<()> {
         let name = &dev.friendly_name;
 
@@ -182,8 +264,8 @@ impl Z2mBackend {
             usertest: None,
         };
 
-        self.map.insert(name.to_string(), link_button);
-        self.rmap.insert(link_button, name.to_string());
+        self.map.insert(name.clone(), link_button);
+        self.rmap.insert(link_button, name.clone());
 
         let mut res = self.state.lock().await;
         let button = Button {
@@ -448,6 +530,60 @@ impl Z2mBackend {
         drop(res);
 
         Ok(())
+    }
+}
+
+/// The resource a sensor owns, before it has reported anything.
+///
+/// A sensor that has said nothing yet is still a sensor: the resource exists
+/// with `*_valid: false` so a client shows it as unknown rather than absent.
+fn initial_resource(kind: SensorKind, owner: ResourceLink) -> Resource {
+    match kind {
+        SensorKind::Motion => Resource::Motion(Motion {
+            enabled: true,
+            owner,
+            motion: json!({
+                "motion": false,
+                "motion_valid": false,
+            }),
+            sensitivity: json!({
+                "sensitivity": 0,
+                "sensitivity_max": 4,
+            }),
+        }),
+        SensorKind::Temperature => Resource::Temperature(Temperature {
+            enabled: true,
+            owner,
+            temperature: json!({
+                "temperature": 0.0,
+                "temperature_valid": false,
+            }),
+        }),
+        SensorKind::Illuminance => Resource::LightLevel(LightLevel {
+            enabled: true,
+            owner,
+            light: json!({
+                "light_level": 0,
+                "light_level_valid": false,
+            }),
+        }),
+        SensorKind::Contact => Resource::Contact(Contact(json!({
+            "owner": owner,
+            "contact": {
+                "state": "no_contact",
+                "state_valid": false,
+            },
+        }))),
+        SensorKind::Remote => Resource::Button(Button {
+            owner,
+            metadata: ButtonMetadata { control_id: 0 },
+            button: ButtonData {
+                last_event: None,
+                button_report: None,
+                repeat_interval: Some(100),
+                event_values: Some(json!(["initial_press", "repeat"])),
+            },
+        }),
     }
 }
 

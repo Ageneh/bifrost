@@ -31,7 +31,16 @@ friendly_name: string, model: string | null, vendor: string | null, description:
  */
 supported: boolean, 
 /**
- * Why not, for every unsupported device.
+ * True when the device is imported into the Hue API right now.
+ *
+ * A sensor Bifrost can serve is still not imported until the
+ * configuration enables it, and the difference is what the Devices
+ * screen explains.
+ */
+imported: boolean, 
+/**
+ * Why not, for every unsupported device, and for a supported one that
+ * is not imported.
  */
 unsupported_reason: string | null, exposes: Array<ExposeSummary>, capabilities: Capabilities, availability: Availability, 
 /**

@@ -153,16 +153,13 @@ fn read_devices(payload: &serde_json::Value) -> Vec<DiscoveredDevice> {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
 
-            // the same rule the import uses: a light expose is what the Hue
-            // API can serve
-            let supported = definition
-                .and_then(|def| def.get("exposes"))
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|exposes| {
-                    exposes.iter().any(|expose| {
-                        expose.get("type").and_then(serde_json::Value::as_str) == Some("light")
-                    })
-                });
+            // the same rule the import uses: the class the inventory
+            // derives decides whether the Hue API can serve the device, so
+            // a sensor the wizard offers is a sensor it can import
+            // parsed from text, not a `Value`: the IEEE address deserializer
+            // borrows the string it reads
+            let supported = serde_json::from_str::<z2m::api::Device>(&device.to_string())
+                .is_ok_and(|device| crate::inventory::classify(&device).1);
 
             Some(DiscoveredDevice {
                 ieee: ieee.to_string(),

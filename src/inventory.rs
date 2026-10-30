@@ -394,7 +394,7 @@ pub fn from_z2m(
     previous: Option<&DeviceInfo>,
 ) -> DeviceInfo {
     let (device_type, supported, unsupported_reason) = classify(device);
-    let resources = resource_refs(device, supported);
+    let resources = resource_refs(device, device_type);
 
     DeviceInfo {
         server: server.to_string(),
@@ -405,6 +405,8 @@ pub fn from_z2m(
         description: device.description.clone(),
         device_type,
         supported,
+        // the backend sets this once it knows whether the device is served
+        imported: false,
         unsupported_reason,
         exposes: expose_summaries(device),
         capabilities: capabilities(device),
@@ -417,10 +419,6 @@ pub fn from_z2m(
         readings: previous.map_or_else(Vec::new, |prev| prev.readings.clone()),
     }
 }
-
-/// Why a device of a class Bifrost does not serve is still listed.
-const SENSOR_REASON: &str =
-    "Sensor values arrive in a later wave; the device is listed but not served over the Hue API";
 
 /// The class of `device`, whether Bifrost can serve it, and why not.
 ///
@@ -437,11 +435,7 @@ pub fn classify(device: &z2m::api::Device) -> (DeviceType, bool, Option<String>)
     }
 
     if has("action") {
-        return (
-            DeviceType::Remote,
-            false,
-            Some("A remote has no Hue equivalent; its button events are not served".to_string()),
-        );
+        return (DeviceType::Remote, true, None);
     }
 
     if exposes
@@ -469,7 +463,7 @@ pub fn classify(device: &z2m::api::Device) -> (DeviceType, bool, Option<String>)
         None
     };
     if let Some(sensor) = sensor {
-        return (sensor, false, Some(SENSOR_REASON.to_string()));
+        return (sensor, true, None);
     }
 
     if let Some(out_of_scope) = out_of_scope_class(&exposes) {
@@ -604,29 +598,44 @@ fn display_value(value: &serde_json::Value) -> String {
 }
 
 /// The Hue resources a device owns, as far as its address decides them.
-fn resource_refs(device: &z2m::api::Device, supported: bool) -> Vec<ResourceRef> {
-    let device_ref = ResourceRef {
-        rid: hue::api::RType::Device
-            .deterministic(&device.ieee_address)
-            .rid
-            .to_string(),
-        rtype: "device".to_string(),
+fn resource_refs(device: &z2m::api::Device, device_type: DeviceType) -> Vec<ResourceRef> {
+    let link = |rtype: hue::api::RType| ResourceRef {
+        rid: rtype.deterministic(&device.ieee_address).rid.to_string(),
+        rtype: rtype_name(rtype).to_string(),
     };
 
-    if !supported {
-        return vec![device_ref];
+    let mut refs = vec![link(hue::api::RType::Device)];
+
+    match device_type {
+        DeviceType::Light => refs.push(link(hue::api::RType::Light)),
+        DeviceType::Motion => refs.push(link(hue::api::RType::Motion)),
+        DeviceType::Temperature => refs.push(link(hue::api::RType::Temperature)),
+        DeviceType::Illuminance => refs.push(link(hue::api::RType::LightLevel)),
+        DeviceType::Contact => refs.push(link(hue::api::RType::Contact)),
+        DeviceType::Remote => refs.push(link(hue::api::RType::Button)),
+        _ => return refs,
     }
 
-    vec![
-        device_ref,
-        ResourceRef {
-            rid: hue::api::RType::Light
-                .deterministic(&device.ieee_address)
-                .rid
-                .to_string(),
-            rtype: "light".to_string(),
-        },
-    ]
+    // every served class carries the two companions a client expects
+    refs.push(link(hue::api::RType::DevicePower));
+    refs.push(link(hue::api::RType::ZigbeeConnectivity));
+    refs
+}
+
+/// The wire name of a resource type, which is what a `ResourceRef` carries.
+const fn rtype_name(rtype: hue::api::RType) -> &'static str {
+    match rtype {
+        hue::api::RType::Device => "device",
+        hue::api::RType::Light => "light",
+        hue::api::RType::Motion => "motion",
+        hue::api::RType::Temperature => "temperature",
+        hue::api::RType::LightLevel => "light_level",
+        hue::api::RType::Contact => "contact",
+        hue::api::RType::Button => "button",
+        hue::api::RType::DevicePower => "device_power",
+        hue::api::RType::ZigbeeConnectivity => "zigbee_connectivity",
+        _ => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -707,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn every_sensor_class_is_recognised_and_explained() {
+    fn every_sensor_class_is_recognised_and_served() {
         let cases = [
             (
                 json!([{"type": "binary", "property": "occupancy", "access": 1, "value_on": true, "value_off": false}]),
@@ -730,8 +739,8 @@ mod tests {
         for (exposes, expected) in cases {
             let (device_type, supported, reason) = classified(&exposes);
             assert_eq!(device_type, expected);
-            assert!(!supported);
-            assert!(reason.unwrap().contains("later wave"));
+            assert!(supported);
+            assert_eq!(reason, None);
         }
     }
 
@@ -742,8 +751,8 @@ mod tests {
         ]));
 
         assert_eq!(device_type, DeviceType::Remote);
-        assert!(!supported);
-        assert!(reason.unwrap().contains("remote"));
+        assert!(supported);
+        assert_eq!(reason, None);
     }
 
     #[test]
@@ -799,6 +808,7 @@ mod tests {
             description: None,
             device_type: DeviceType::Light,
             supported: true,
+            imported: true,
             unsupported_reason: None,
             exposes: vec![],
             capabilities: Capabilities::default(),
@@ -856,13 +866,7 @@ mod tests {
 
         let first = Utc::now();
         inventory.set_reading("a", "0x01", "occupancy", serde_json::json!(true), first);
-        inventory.set_reading(
-            "a",
-            "0x01",
-            "illuminance",
-            serde_json::json!(312.0),
-            first,
-        );
+        inventory.set_reading("a", "0x01", "illuminance", serde_json::json!(312.0), first);
 
         let device = inventory.device("a", "0x01").unwrap();
         assert_eq!(device.readings.len(), 2);

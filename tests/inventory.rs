@@ -67,11 +67,16 @@ impl Fixture {
 
     /// Start Bifrost against several z2m servers.
     async fn start_with(servers: &[(&str, &str)]) -> Self {
+        Self::start_with_devices(servers, "").await
+    }
+
+    /// Start Bifrost with a `devices:` section in the configuration.
+    async fn start_with_devices(servers: &[(&str, &str)], devices: &str) -> Self {
         let dir = TempDir::new();
-        let servers: String = servers
-            .iter()
-            .map(|(name, url)| format!("  {name}:\n    url: {url}\n"))
-            .collect::<String>();
+        let servers: String = servers.iter().fold(String::new(), |mut yaml, (name, url)| {
+            yaml.push_str(&format!("  {name}:\n    url: {url}\n"));
+            yaml
+        });
         let yaml = format!(
             "\
 bridge:
@@ -83,7 +88,8 @@ bridge:
   timezone: UTC
 
 z2m:
-{servers}"
+{servers}
+{devices}"
         );
         let store = Arc::new(ConfigStore::load(&dir.write("config.yaml", &yaml)).unwrap());
         let (svm, _future) = ServiceManager::spawn();
@@ -161,11 +167,11 @@ async fn every_class_is_listed_with_its_type_and_support() {
     for (class, expected, supported) in [
         ("light", DeviceType::Light, true),
         ("plug", DeviceType::Plug, false),
-        ("motion", DeviceType::Motion, false),
-        ("temperature", DeviceType::Temperature, false),
-        ("illuminance", DeviceType::Illuminance, false),
-        ("contact", DeviceType::Contact, false),
-        ("remote", DeviceType::Remote, false),
+        ("motion", DeviceType::Motion, true),
+        ("temperature", DeviceType::Temperature, true),
+        ("illuminance", DeviceType::Illuminance, true),
+        ("contact", DeviceType::Contact, true),
+        ("remote", DeviceType::Remote, true),
     ] {
         let mock = MockZ2m::start_w04(class).await.unwrap();
         let fixture = Fixture::start("server1", mock.url()).await;
@@ -185,12 +191,60 @@ async fn every_class_is_listed_with_its_type_and_support() {
 
         assert_eq!(device.device_type, expected, "{class}: {device:?}");
         assert_eq!(device.supported, supported, "{class}: {device:?}");
-        // every unsupported device says why
+        // nothing but a light is imported by this configuration, and every
+        // device that is not says why
+        assert_eq!(device.imported, class == "light", "{class}: {device:?}");
         assert_eq!(
-            device.unsupported_reason.is_none(),
-            supported,
+            device.unsupported_reason.is_some(),
+            !device.imported,
             "{class}: {device:?}"
         );
+    }
+}
+
+/// Product F3: an upgrade must not import every sensor it finds.
+///
+/// The same fixture, twice: once with the configuration an install that
+/// predates this wave has, which names no device, and once with the one line
+/// that opts the sensor in.
+#[tokio::test]
+async fn a_sensor_is_imported_only_when_the_configuration_enables_it() {
+    for (enabled, expect_import) in [(None, false), (Some(true), true)] {
+        let mock = MockZ2m::start_w04("motion").await.unwrap();
+        let devices = enabled.map_or_else(String::new, |value| {
+            format!("devices:\n  \"0x00158d0000000020\":\n    enabled: {value}\n")
+        });
+        let fixture = Fixture::start_with_devices(&[("server1", mock.url())], &devices).await;
+
+        let device = fixture.device("0x00158d0000000020").await;
+
+        assert_eq!(
+            device.imported, expect_import,
+            "enabled={enabled:?}: {device:?}"
+        );
+        assert!(device.supported, "{device:?}");
+        assert_eq!(
+            device.unsupported_reason.is_none(),
+            expect_import,
+            "enabled={enabled:?}: {device:?}"
+        );
+        if !expect_import {
+            assert!(
+                device
+                    .unsupported_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("devices.")),
+                "{device:?}"
+            );
+        }
+
+        // the Hue API carries the motion resource only when it is imported
+        let has_motion = {
+            let res = fixture.state.res.lock().await;
+            !res.get_resources_by_type(hue::api::RType::Motion)
+                .is_empty()
+        };
+        assert_eq!(has_motion, expect_import, "enabled={enabled:?}");
     }
 }
 

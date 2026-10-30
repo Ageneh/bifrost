@@ -193,6 +193,7 @@ mod tests {
             description: None,
             device_type,
             supported: device_type == DeviceType::Light,
+            imported: device_type == DeviceType::Light,
             unsupported_reason: (device_type != DeviceType::Light)
                 .then(|| "not served".to_string()),
             exposes: vec![],

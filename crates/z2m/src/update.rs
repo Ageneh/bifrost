@@ -363,10 +363,7 @@ mod tests {
             update(json!({"action": "single"})).action.as_deref(),
             Some("single")
         );
-        assert_eq!(
-            update(json!({"action": 2})).action.as_deref(),
-            Some("2")
-        );
+        assert_eq!(update(json!({"action": 2})).action.as_deref(), Some("2"));
     }
 
     #[test]

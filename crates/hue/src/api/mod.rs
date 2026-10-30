@@ -50,7 +50,7 @@ pub use scene::{
 use serde::ser::SerializeMap;
 pub use stream::HueStreamKey;
 pub use stubs::{
-    Bridge, BridgeHome, Button, ButtonData, ButtonMetadata, ButtonReport, DevicePower,
+    Bridge, BridgeHome, Button, ButtonData, ButtonMetadata, ButtonReport, Contact, DevicePower,
     DeviceSoftwareUpdate, DollarRef, GeofenceClient, Geolocation, GroupedLightLevel, GroupedMotion,
     Homekit, LightLevel, Matter, Metadata, MetadataUpdate, Motion, PrivateGroup, PublicImage,
     RelativeRotary, SmartScene, Taurus, Temperature, TimeZone, ZigbeeConnectivity,
@@ -123,7 +123,7 @@ pub enum Resource {
 
     /* Unmapped variants */
     CameraMotion(Value),
-    Contact(Value),
+    Contact(Contact),
     MatterFabric(Value),
     ServiceGroup(Value),
     Tamper(Value),
@@ -257,7 +257,7 @@ impl Resource {
             RType::ZigbeeDeviceDiscovery => Self::ZigbeeDeviceDiscovery(from_value(obj)?),
             RType::Zone => Self::Zone(from_value(obj)?),
             RType::CameraMotion => Self::CameraMotion(obj),
-            RType::Contact => Self::Contact(obj),
+            RType::Contact => Self::Contact(Contact(obj)),
             RType::MatterFabric => Self::MatterFabric(obj),
             RType::ServiceGroup => Self::ServiceGroup(obj),
             RType::Tamper => Self::Tamper(obj),
@@ -344,6 +344,7 @@ resource_conversion_impl!(Scene);
 resource_conversion_impl!(SmartScene);
 resource_conversion_impl!(Taurus);
 resource_conversion_impl!(Temperature);
+resource_conversion_impl!(Contact);
 resource_conversion_impl!(ZigbeeConnectivity);
 resource_conversion_impl!(ZigbeeDeviceDiscovery);
 resource_conversion_impl!(Zone);

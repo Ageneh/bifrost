@@ -168,7 +168,7 @@ pub struct GroupRef {
 /// The value is already in the semantics the property names: `occupancy` and
 /// `contact` are true when there is motion and when the contact is open, and
 /// `temperature` is degrees Celsius in the unit its expose declares.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct SensorReading {
@@ -184,7 +184,7 @@ pub struct SensorReading {
 /// Everything Bifrost knows about one device.
 ///
 /// Wave 9 extends this additively; no field here may change shape.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct DeviceInfo {
@@ -200,7 +200,14 @@ pub struct DeviceInfo {
     pub device_type: DeviceType,
     /// True only where Bifrost can serve the device over the Hue API.
     pub supported: bool,
-    /// Why not, for every unsupported device.
+    /// True when the device is imported into the Hue API right now.
+    ///
+    /// A sensor Bifrost can serve is still not imported until the
+    /// configuration enables it, and the difference is what the Devices
+    /// screen explains.
+    pub imported: bool,
+    /// Why not, for every unsupported device, and for a supported one that
+    /// is not imported.
     pub unsupported_reason: Option<String>,
     pub exposes: Vec<ExposeSummary>,
     pub capabilities: Capabilities,
@@ -289,7 +296,7 @@ impl ServerInfo {
 }
 
 /// The whole inventory, as one value.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct InventorySnapshot {
@@ -300,7 +307,7 @@ pub struct InventorySnapshot {
 }
 
 /// A change to the inventory, pushed on the websocket.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 #[serde(tag = "kind", rename_all = "snake_case")]

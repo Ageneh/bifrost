@@ -4,6 +4,7 @@ mod bridge_import;
 pub mod discover;
 pub mod entertainment;
 pub mod learn;
+pub mod sensor;
 pub mod websocket;
 pub mod zclcommand;
 
@@ -35,6 +36,7 @@ use z2m::update::DeviceUpdate;
 
 use crate::backend::z2m::entertainment::AreaStream;
 use crate::backend::z2m::learn::SceneLearn;
+use crate::backend::z2m::sensor::SensorKind;
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
@@ -163,6 +165,12 @@ pub struct Z2mBackend {
     learner: SceneLearn,
     ignore: HashSet<String>,
     network: HashMap<String, z2m::api::Device>,
+    /// The class of every sensor this backend knows, by friendly name.
+    ///
+    /// Kept for every sensor, imported into the Hue API or not: the Devices
+    /// screen shows a reading whether or not the device is served, and an
+    /// opt-in sensor that is not imported must still report.
+    sensors: HashMap<String, SensorKind>,
     /// The z2m group each device belongs to, by IEEE address.
     group_of: HashMap<String, GroupRef>,
     /// The id of each z2m group, by friendly name.
@@ -209,6 +217,7 @@ impl Z2mBackend {
         let ignore = HashSet::new();
         let learner = SceneLearn::new(name.clone());
         let network = HashMap::new();
+        let sensors = HashMap::new();
         let group_of = HashMap::new();
         let group_ids = HashMap::new();
         let entstreams = BTreeMap::new();
@@ -224,6 +233,7 @@ impl Z2mBackend {
             learner,
             ignore,
             network,
+            sensors,
             group_of,
             group_ids,
             entstreams,
