@@ -101,6 +101,10 @@ const doctorInput = computed(() => ({
         active: streams.streams().length,
         max: streams.status.value.max_streams,
       },
+  lowBattery: inventory.lowBattery.value.map(device => ({
+    name: device.friendly_name,
+    battery: device.battery ?? 0,
+  })),
 }))
 
 const attention = computed(() => deriveAttention(doctorInput.value))

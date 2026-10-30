@@ -4,7 +4,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::{get, post, put};
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use log::{info, warn};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -12,19 +12,19 @@ use tokio::sync::MutexGuard;
 
 use bifrost_api::backend::BackendRequest;
 use hue::api::{
-    Device, Entertainment, EntertainmentConfiguration, EntertainmentConfigurationAction,
+    Button, Device, Entertainment, EntertainmentConfiguration, EntertainmentConfigurationAction,
     EntertainmentConfigurationLocationsNew, EntertainmentConfigurationMetadata,
     EntertainmentConfigurationNew, EntertainmentConfigurationServiceLocationsNew,
     EntertainmentConfigurationType, EntertainmentConfigurationUpdate, GroupedLight,
-    GroupedLightUpdate, Light, LightUpdate, RType, ResourceLink, Room, Scene, SceneActive,
-    SceneStatus, SceneUpdate, V1Reply,
+    GroupedLightUpdate, Light, LightUpdate, RType, Resource, ResourceLink, Room, Scene,
+    SceneActive, SceneStatus, SceneUpdate, V1Reply, ZigbeeConnectivity, ZigbeeConnectivityStatus,
 };
 use hue::error::{HueApiV1Error, HueError, HueResult};
 use hue::legacy_api::{
     ApiGroup, ApiGroupAction, ApiGroupActionUpdate, ApiGroupClass, ApiGroupNew, ApiGroupState,
     ApiGroupType, ApiGroupUpdate2, ApiLight, ApiLightStateUpdate, ApiResourceType, ApiScene,
-    ApiSceneAppData, ApiSceneType, ApiSceneVersion, ApiSensor, ApiUserConfig, Capabilities,
-    HueApiResult, NewUser, NewUserReply,
+    ApiSceneAppData, ApiSceneType, ApiSceneVersion, ApiSensor, ApiSensorInfo, ApiUserConfig,
+    Capabilities, HueApiResult, NewUser, NewUserReply,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -226,6 +226,155 @@ fn get_scenes(owner: &str, res: &MutexGuard<Resources>) -> ApiV1Result<HashMap<S
     Ok(scenes)
 }
 
+/// The v1 sensor rows: one per Hue sensor resource Bifrost serves.
+///
+/// A sensor that is not imported has no resource, so it has no row; the
+/// Devices screen is where a device Bifrost declines says why.
+#[allow(clippy::result_large_err)]
+fn get_sensors(res: &MutexGuard<Resources>) -> ApiV1Result<HashMap<u32, ApiSensor>> {
+    let now = Utc::now();
+    let mut sensors = HashMap::new();
+
+    for rr in res.get_resources() {
+        let Some(owner) = resource_owner(&rr.obj) else {
+            continue;
+        };
+        let Some(device) = res.get::<Device>(&owner).ok() else {
+            continue;
+        };
+        let Some(zigcon) = owned_zigbee_connectivity(res, owner) else {
+            continue;
+        };
+        let battery = owned_battery(res, owner);
+
+        let info = |lastupdated| ApiSensorInfo {
+            uniqueid: hue::legacy_api::uniqueid(&zigcon.mac_address, 1, 0x0406),
+            name: device.metadata.name.clone(),
+            manufacturername: device.product_data.manufacturer_name.clone(),
+            modelid: device.product_data.model_id.clone(),
+            swversion: device.product_data.software_version.clone(),
+            lastupdated,
+            battery,
+            reachable: matches!(zigcon.status, ZigbeeConnectivityStatus::Connected),
+        };
+
+        let row = match &rr.obj {
+            Resource::Motion(motion) => Some(ApiSensor::zll_presence(
+                &info(changed_at(&motion.motion["motion_report"]["changed"], now)),
+                motion.motion["motion"].as_bool().unwrap_or(false),
+            )),
+            Resource::Temperature(temperature) => Some(ApiSensor::zll_temperature(
+                &info(changed_at(
+                    &temperature.temperature["temperature_report"]["changed"],
+                    now,
+                )),
+                temperature_centi(&temperature.temperature),
+            )),
+            Resource::LightLevel(light) => Some(ApiSensor::zll_light_level(
+                &info(changed_at(
+                    &light.light["light_level_report"]["changed"],
+                    now,
+                )),
+                light.light["light_level"]
+                    .as_u64()
+                    .and_then(|level| u32::try_from(level).ok())
+                    .unwrap_or_default(),
+            )),
+            Resource::Contact(contact) => Some(ApiSensor::clip_generic_status(
+                &info(changed_at(
+                    &contact.0["contact"]["contact_report"]["changed"],
+                    now,
+                )),
+                u8::from(contact.0["contact"]["state"].as_str() == Some("contact")),
+            )),
+            Resource::Button(button) => Some(ApiSensor::zll_switch(
+                &info(button_last_event(button).unwrap_or(now)),
+                button_event_code(button),
+            )),
+            _ => None,
+        };
+
+        if let Some(row) = row {
+            sensors.insert(res.get_id_v1_index(rr.id)?, row);
+        }
+    }
+
+    Ok(sensors)
+}
+
+/// The resource a v1 row belongs to, including the unmapped contact one.
+fn resource_owner(obj: &Resource) -> Option<ResourceLink> {
+    if let Resource::Contact(contact) = obj {
+        return contact
+            .0
+            .get("owner")
+            .and_then(|owner| serde_json::from_value(owner.clone()).ok());
+    }
+    obj.owner()
+}
+
+/// The `ZigbeeConnectivity` a device owns, which is where its address is.
+fn owned_zigbee_connectivity(res: &Resources, owner: ResourceLink) -> Option<ZigbeeConnectivity> {
+    res.get_resources_by_owner(owner)
+        .into_iter()
+        .find_map(|rr| match rr.obj {
+            Resource::ZigbeeConnectivity(zigcon) => Some(zigcon),
+            _ => None,
+        })
+}
+
+/// The battery level a device's `DevicePower` reports, where it has one.
+fn owned_battery(res: &Resources, owner: ResourceLink) -> Option<u8> {
+    res.get_resources_by_owner(owner)
+        .into_iter()
+        .find_map(|rr| match rr.obj {
+            Resource::DevicePower(power) => power.power_state["battery_level"]
+                .as_u64()
+                .and_then(|level| u8::try_from(level).ok()),
+            _ => None,
+        })
+}
+
+/// A report timestamp as a time, or `fallback` when the report is missing.
+fn changed_at(value: &Value, fallback: DateTime<Utc>) -> DateTime<Utc> {
+    value
+        .as_str()
+        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
+        .map_or(fallback, |at| at.with_timezone(&Utc))
+}
+
+/// A temperature in the hundredths of a degree v1 carries.
+///
+/// The cast is a truncation only in name: the value is rounded first, and a
+/// temperature outside `i32` hundredths is not a reading a sensor can send.
+#[allow(clippy::cast_possible_truncation)]
+fn temperature_centi(value: &Value) -> i32 {
+    let celsius = value["temperature"].as_f64().unwrap_or_default();
+    (celsius * 100.0).round() as i32
+}
+
+/// When a button last reported, from its `button_report`.
+fn button_last_event(button: &Button) -> Option<DateTime<Utc>> {
+    let report = button.button.button_report.as_ref()?;
+    Some(report.updated)
+}
+
+/// The `buttonevent` code of a button's last report.
+fn button_event_code(button: &Button) -> u32 {
+    button.button.button_report.as_ref().map_or(0, |report| {
+        crate::backend::z2m::sensor::buttonevent(&report.event)
+    })
+}
+
+/// Every sensor row, plus the built-in daylight sensor v1 always answers
+/// with.
+#[allow(clippy::result_large_err)]
+fn sensors_with_daylight(res: &MutexGuard<Resources>) -> ApiV1Result<HashMap<u32, ApiSensor>> {
+    let mut sensors = get_sensors(res)?;
+    sensors.insert(1, ApiSensor::builtin_daylight_sensor());
+    Ok(sensors)
+}
+
 #[allow(clippy::zero_sized_map_values)]
 async fn get_api_user(
     state: State<AppState>,
@@ -241,7 +390,7 @@ async fn get_api_user(
         rules: HashMap::new(),
         scenes: get_scenes(&username, &lock)?,
         schedules: HashMap::new(),
-        sensors: HashMap::from([(1, ApiSensor::builtin_daylight_sensor())]),
+        sensors: sensors_with_daylight(&lock)?,
     }))
 }
 
@@ -255,10 +404,10 @@ async fn get_api_user_resource(
         ApiResourceType::Lights => Ok(Json(json!(get_lights(lock)?))),
         ApiResourceType::Groups => Ok(Json(json!(get_groups(lock, false)?))),
         ApiResourceType::Scenes => Ok(Json(json!(get_scenes(&username, lock)?))),
-        ApiResourceType::Resourcelinks
-        | ApiResourceType::Rules
-        | ApiResourceType::Schedules
-        | ApiResourceType::Sensors => Ok(Json(json!({}))),
+        ApiResourceType::Sensors => Ok(Json(json!(sensors_with_daylight(lock)?))),
+        ApiResourceType::Resourcelinks | ApiResourceType::Rules | ApiResourceType::Schedules => {
+            Ok(Json(json!({})))
+        }
         ApiResourceType::Capabilities => Ok(Json(json!(Capabilities::new()))),
     }
 }
@@ -357,6 +506,7 @@ async fn put_api_user_resource(
 }
 
 #[allow(clippy::significant_drop_tightening)]
+#[allow(clippy::significant_drop_tightening)]
 async fn get_api_user_resource_id(
     State(state): State<AppState>,
     Path((username, resource, id)): Path<(String, ApiResourceType, u32)>,
@@ -388,6 +538,11 @@ async fn get_api_user_resource_id(
                 .ok_or(HueError::V1NotFound(id))?;
 
             json!(group)
+        }
+        ApiResourceType::Sensors => {
+            let lock = state.res.lock().await;
+            let sensors = sensors_with_daylight(&lock)?;
+            json!(sensors.get(&id).ok_or(HueError::V1NotFound(id))?)
         }
         _ => Err(HueError::V1NotFound(id))?,
     };

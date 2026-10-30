@@ -1,10 +1,14 @@
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite;
 use uuid::Uuid;
 
-use hue::api::{DimmingUpdate, GroupedLight, Light, LightUpdate, RType, Resource, Room};
+use hue::api::{
+    Button, ButtonReport, Contact, DevicePower, DimmingUpdate, GroupedLight, Light, LightLevel,
+    LightUpdate, Motion, RType, Resource, Room, Temperature, ZigbeeConnectivity,
+    ZigbeeConnectivityStatus,
+};
 use z2m::api::{
     BridgeDevices, BridgeEvent, DeviceRemoveResponse, Group, GroupMemberChange, Message,
     RawMessage, Response,
@@ -12,6 +16,7 @@ use z2m::api::{
 use z2m::update::DeviceUpdate;
 
 use crate::backend::z2m::Z2mBackend;
+use crate::backend::z2m::sensor::{self, SensorKind};
 use crate::error::{ApiError, ApiResult};
 use crate::inventory::{Availability, GroupRef, PermitJoinState, RoomRef, from_z2m};
 
@@ -25,6 +30,23 @@ impl Z2mBackend {
         let previous = inventory.device(&self.name, &ieee);
         let mut info = from_z2m(&self.name, dev, previous.as_ref());
         info.group = self.group_of.get(&ieee).cloned();
+        info.imported = self.map.contains_key(&dev.friendly_name);
+
+        // a device Bifrost could serve but does not is not silent: the
+        // reason names the switch that changes it
+        if info.supported && !info.imported {
+            let enabled = self
+                .store
+                .active()
+                .device(&ieee)
+                .and_then(|device| device.enabled);
+            info.unsupported_reason = Some(if enabled == Some(false) {
+                format!("Disabled in the configuration: devices.{ieee}.enabled is false")
+            } else {
+                format!("Not imported: set devices.{ieee}.enabled to serve it over the Hue API")
+            });
+        }
+
         inventory.upsert(info);
     }
 
@@ -72,19 +94,43 @@ impl Z2mBackend {
     }
 
     /// Apply a `<name>/availability` report.
-    fn handle_availability(&self, friendly_name: &str, payload: &Value) {
-        let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(friendly_name))
-        else {
-            return;
-        };
-
+    async fn handle_availability(&self, friendly_name: &str, payload: &Value) {
         let availability = match payload.get("state").and_then(Value::as_str) {
             Some("online") => Availability::Online,
             Some("offline") => Availability::Offline,
             _ => return,
         };
 
-        inventory.set_availability(&self.name, &ieee, availability, Some(Utc::now()));
+        if let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(friendly_name)) {
+            inventory.set_availability(&self.name, &ieee, availability, Some(Utc::now()));
+        }
+
+        // the Hue resource says the same thing as the inventory: a client
+        // that reads `zigbee_connectivity` must not see a device as fine
+        // while the console shows it as gone
+        let Some(device) = self.network.get(friendly_name) else {
+            return;
+        };
+        let link = RType::ZigbeeConnectivity.deterministic(&device.ieee_address);
+        let status = match availability {
+            Availability::Online => ZigbeeConnectivityStatus::Connected,
+            Availability::Offline | Availability::Unknown => {
+                ZigbeeConnectivityStatus::ConnectivityIssue
+            }
+        };
+
+        let mut res = self.state.lock().await;
+        if res.get::<ZigbeeConnectivity>(&link).is_err() {
+            return;
+        }
+        if let Err(err) = res.update::<ZigbeeConnectivity>(&link.rid, |known| {
+            known.status = status.clone();
+        }) {
+            log::error!(
+                "[{}] Cannot record availability of {friendly_name}: {err:?}",
+                self.name
+            );
+        }
     }
 
     /// Record that a device reported something on `topic`.
@@ -209,46 +255,267 @@ impl Z2mBackend {
         })
     }
 
-    async fn handle_update(&mut self, rid: &Uuid, payload: &Value) -> ApiResult<()> {
-        if let Value::String(string) = payload {
-            if string.is_empty() {
-                log::debug!("Ignoring empty payload for {rid}");
-                return Ok(());
-            }
-        }
-
-        let upd = DeviceUpdate::deserialize(payload)?;
-
+    // the house error type is what every resource operation returns, so it is
+    // propagated rather than flattened here
+    #[allow(clippy::result_large_err)]
+    async fn handle_update(
+        &mut self,
+        topic: &str,
+        rid: &Uuid,
+        upd: &DeviceUpdate,
+    ) -> ApiResult<()> {
         let obj = self.state.lock().await.get_resource_by_id(rid)?.obj;
         match obj {
             Resource::Light(_) => {
-                if let Err(e) = self.handle_update_light(rid, &upd).await {
+                if let Err(e) = self.handle_update_light(rid, upd).await {
                     log::error!("FAIL: {e:?} in {upd:?}");
                 }
             }
             Resource::GroupedLight(_) => {
-                if let Err(e) = self.handle_update_grouped_light(rid, &upd).await {
+                if let Err(e) = self.handle_update_grouped_light(rid, upd).await {
                     log::error!("FAIL: {e:?} in {upd:?}");
                 }
             }
+            Resource::Motion(_)
+            | Resource::Temperature(_)
+            | Resource::LightLevel(_)
+            | Resource::Contact(_) => {
+                if let Err(e) = self.handle_update_sensor(topic, rid, upd).await {
+                    log::error!("FAIL: {e:?} in {upd:?}");
+                }
+            }
+            // a button changes on its `/action` topic, not on the device one
             _ => {}
+        }
+
+        if let Err(e) = self.handle_update_power(topic, upd).await {
+            log::error!("FAIL: {e:?} in {upd:?}");
         }
 
         Ok(())
     }
 
+    /// Apply one reading to the Hue resource its class owns.
+    ///
+    /// A binary is turned into "is it happening" first, because the z2m value
+    /// means different things on different firmware; see
+    /// [`crate::backend::z2m::sensor::is_active`].
+    #[allow(clippy::result_large_err, clippy::significant_drop_tightening)]
+    async fn handle_update_sensor(
+        &self,
+        topic: &str,
+        rid: &Uuid,
+        upd: &DeviceUpdate,
+    ) -> ApiResult<()> {
+        let device = self.network.get(topic);
+        let mut res = self.state.lock().await;
+
+        // every reading carries when it changed: v1 writes that timestamp
+        // into `state.lastupdated`, and a client that shows "3 min ago"
+        // needs the same one
+        let changed = Utc::now();
+
+        if let Some(raw) = upd.occupancy {
+            let motion = device.map_or(raw, |device| sensor::is_active(device, "occupancy", raw));
+            res.update::<Motion>(rid, |known| {
+                known.motion = json!({
+                    "motion": motion,
+                    "motion_valid": true,
+                    "motion_report": { "changed": changed, "motion": motion },
+                });
+            })?;
+        }
+
+        if let Some(temperature) = upd.temperature {
+            res.update::<Temperature>(rid, |known| {
+                known.temperature = json!({
+                    "temperature": temperature,
+                    "temperature_valid": true,
+                    "temperature_report": { "changed": changed, "temperature": temperature },
+                });
+            })?;
+        }
+
+        if let Some(lux) = upd.illuminance {
+            let level = sensor::light_level(lux);
+            res.update::<LightLevel>(rid, |known| {
+                known.light = json!({
+                    "light_level": level,
+                    "light_level_valid": true,
+                    "light_level_report": { "changed": changed, "light_level": level },
+                });
+            })?;
+        }
+
+        if let Some(raw) = upd.contact {
+            let open = device.map_or(raw, |device| sensor::is_active(device, "contact", raw));
+            let state = if open { "contact" } else { "no_contact" };
+            res.update::<Contact>(rid, |known| {
+                known.0["contact"] = json!({
+                    "state": state,
+                    "state_valid": true,
+                    "contact_report": { "changed": changed, "state": state },
+                });
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Mirror the battery level onto the device's `DevicePower` resource.
+    #[allow(clippy::result_large_err, clippy::significant_drop_tightening)]
+    async fn handle_update_power(&self, topic: &str, upd: &DeviceUpdate) -> ApiResult<()> {
+        let Some(level) = upd.battery else {
+            return Ok(());
+        };
+        let Some(device) = self.network.get(topic) else {
+            return Ok(());
+        };
+
+        let link = RType::DevicePower.deterministic(&device.ieee_address);
+        let mut res = self.state.lock().await;
+        if res.get::<DevicePower>(&link).is_err() {
+            return Ok(());
+        }
+        let power_state = sensor::power_state(Some(sensor::battery_percent(level)));
+        res.update::<DevicePower>(&link.rid, |known| {
+            known.power_state = power_state;
+        })?;
+
+        Ok(())
+    }
+
+    /// Record every sensor reading a device message carries.
+    ///
+    /// This runs for a sensor that is not imported into the Hue API as well:
+    /// the Devices screen shows the reading either way, and an opt-in sensor
+    /// that has not been opted in must still report.
+    fn record_readings(&self, topic: &str, upd: &DeviceUpdate) {
+        let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(topic)) else {
+            return;
+        };
+
+        let now = Utc::now();
+
+        if let Some(level) = upd.battery {
+            inventory.set_battery(&self.name, &ieee, sensor::battery_percent(level));
+        }
+
+        let (Some(device), Some(kind)) = (self.network.get(topic), self.sensors.get(topic)) else {
+            return;
+        };
+
+        // the reading is stored with the same meaning the resource carries,
+        // so the screen and the Hue app never disagree
+        let value = match *kind {
+            SensorKind::Motion => upd
+                .occupancy
+                .map(|raw| json!(sensor::is_active(device, "occupancy", raw))),
+            SensorKind::Temperature => upd.temperature.map(|value| json!(value)),
+            SensorKind::Illuminance => upd.illuminance.map(|value| json!(value)),
+            SensorKind::Contact => upd
+                .contact
+                .map(|raw| json!(sensor::is_active(device, "contact", raw))),
+            SensorKind::Remote => None,
+        };
+
+        if let Some(value) = value {
+            // the inventory holds the current state; the event is the change,
+            // and a screen that shows "21.4 °C at 14:02" needs the second
+            if let Some(events) = &self.device_events {
+                events.publish(&ieee, kind.property(), value.clone(), now);
+            }
+            inventory.set_reading(&self.name, &ieee, kind.property(), value, now);
+        }
+    }
+
+    /// Apply a `<name>/action` report: a remote's button press.
+    ///
+    /// The press is both a reading the Devices screen shows and an update of
+    /// the remote's `Button` resource, so the Hue app and the console see the
+    /// same thing at the same moment.
+    async fn handle_action(&self, name: &str, payload: &Value) {
+        let Some(action) = payload.get("action").and_then(Value::as_str) else {
+            return;
+        };
+        let action = action.to_string();
+
+        self.touch_device(name);
+
+        let at = Utc::now();
+        if let Some(ieee) = self.device_ieee(name) {
+            if let Some(events) = &self.device_events {
+                events.publish(&ieee, "action", json!(action), at);
+            }
+            if let Some(inventory) = self.inventory() {
+                inventory.set_reading(&self.name, &ieee, "action", json!(action), at);
+            }
+        }
+
+        if let Some(battery) = payload.get("battery").and_then(Value::as_f64) {
+            if let Some(ieee) = self.device_ieee(name) {
+                if let Some(inventory) = self.inventory() {
+                    inventory.set_battery(&self.name, &ieee, sensor::battery_percent(battery));
+                }
+            }
+        }
+
+        let Some(link) = self.map.get(name).copied() else {
+            return;
+        };
+        if link.rtype != RType::Button {
+            return;
+        }
+
+        let report = ButtonReport {
+            updated: Utc::now(),
+            event: action.clone(),
+        };
+        let mut res = self.state.lock().await;
+        if let Err(err) = res.update::<Button>(&link.rid, |button| {
+            button.button.last_event = Some(json!({
+                "event": action,
+                "updated": report.updated,
+            }));
+            button.button.button_report = Some(report.clone());
+        }) {
+            log::error!("[{}] Cannot record action on {name}: {err:?}", self.name);
+        }
+    }
+
     async fn handle_device_message(&mut self, msg: RawMessage) -> ApiResult<()> {
         if let Some(name) = msg.topic.strip_suffix("/availability") {
             // https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-availability
-            self.handle_availability(name, &msg.payload);
+            self.handle_availability(name, &msg.payload).await;
             return Ok(());
         }
 
-        if msg.topic.ends_with("/action") {
+        if let Some(name) = msg.topic.strip_suffix("/action") {
             // action: https://www.home-assistant.io/integrations/device_trigger.mqtt/
-            self.touch_device(&msg.topic);
+            self.handle_action(name, &msg.payload).await;
             return Ok(());
         }
+
+        if let Value::String(string) = &msg.payload {
+            if string.is_empty() {
+                log::debug!("Ignoring empty payload on {}", msg.topic);
+                return Ok(());
+            }
+        }
+
+        let upd = match DeviceUpdate::deserialize(&msg.payload) {
+            Ok(upd) => upd,
+            Err(err) => {
+                log::error!(
+                    "Cannot parse update on {}: {err}\n{}",
+                    msg.topic,
+                    serde_json::to_string_pretty(&msg.payload)?
+                );
+                return Ok(());
+            }
+        };
+
+        self.record_readings(&msg.topic, &upd);
 
         let Some(ref val) = self.map.get(&msg.topic).copied() else {
             if !self.ignore.contains(&msg.topic) {
@@ -262,10 +529,10 @@ impl Z2mBackend {
         };
 
         self.touch_device(&msg.topic);
-        let res = self.handle_update(&val.rid, &msg.payload).await;
-        if let Err(ref err) = res {
+        if let Err(ref err) = self.handle_update(&msg.topic, &val.rid, &upd).await {
             log::error!(
-                "Cannot parse update: {err}\n{}",
+                "Cannot apply update on {}: {err}\n{}",
+                msg.topic,
                 serde_json::to_string_pretty(&msg.payload)?
             );
         }
@@ -283,7 +550,15 @@ impl Z2mBackend {
             self.network.insert(dev.friendly_name.clone(), dev.clone());
 
             let ieee = dev.ieee_address.to_string();
-            if config.device(&ieee).and_then(|device| device.enabled) == Some(false) {
+            let enabled = config.device(&ieee).and_then(|device| device.enabled);
+
+            // a sensor's class is remembered whether or not it is imported:
+            // the Devices screen shows its reading either way
+            if let Some(kind) = SensorKind::of(dev) {
+                self.sensors.insert(dev.friendly_name.clone(), kind);
+            }
+
+            if enabled == Some(false) {
                 log::info!(
                     "[{}] Leaving {ieee} ({}) out: disabled in the configuration",
                     self.name,
@@ -303,6 +578,29 @@ impl Z2mBackend {
                     dev.model_id.as_deref().unwrap_or("<unknown model>")
                 );
                 self.add_light(dev, exp).await?;
+            } else if let Some(kind) = self.sensors.get(&dev.friendly_name).copied() {
+                // product F3: a sensor is opt-in on an install that predates
+                // this wave. Importing every sensor on upgrade would add a
+                // duplicate Hue resource for each one, so a sensor reaches
+                // the Hue API only when the configuration names it enabled.
+                if !enabled.unwrap_or_default() {
+                    log::info!(
+                        "[{}] Leaving {ieee} ({}) out: sensors are opt-in \
+                         (set devices.{ieee}.enabled to import it)",
+                        self.name,
+                        dev.friendly_name
+                    );
+                    self.ignore.insert(dev.friendly_name.clone());
+                } else {
+                    log::info!(
+                        "[{}] Adding {kind:?} {:?}: [{}] ({})",
+                        self.name,
+                        dev.ieee_address,
+                        dev.friendly_name,
+                        dev.model_id.as_deref().unwrap_or("<unknown model>")
+                    );
+                    self.add_sensor(dev, kind).await?;
+                }
             } else {
                 log::debug!(
                     "[{}] Ignoring unsupported device {}",
@@ -313,18 +611,6 @@ impl Z2mBackend {
             }
 
             self.publish_device(dev);
-            /*
-            if dev.expose_action() {
-                log::info!(
-                    "[{}] Adding switch {:?}: [{}] ({})",
-                    self.name,
-                    dev.ieee_address,
-                    dev.friendly_name,
-                    dev.model_id.as_deref().unwrap_or("<unknown model>")
-                );
-                self.add_switch(dev).await?;
-            }
-            */
         }
 
         // devices and groups arrive in either order, so the room overrides
@@ -362,6 +648,7 @@ impl Z2mBackend {
     /// Drop a device from everything that tracks it, by friendly name.
     fn forget_device(&mut self, friendly_name: &str) {
         self.ignore.remove(friendly_name);
+        self.sensors.remove(friendly_name);
         let Some(dev) = self.network.remove(friendly_name) else {
             return;
         };

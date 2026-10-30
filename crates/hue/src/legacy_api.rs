@@ -769,6 +769,146 @@ impl ApiSensor {
     }
 }
 
+/// What every v1 sensor row carries besides its own reading.
+///
+/// The v1 sensor object is one struct with a string `type`, not an enum, so
+/// a class is a constructor rather than a variant: adding one here cannot
+/// change what an existing row serializes to.
+#[derive(Clone, Debug)]
+pub struct ApiSensorInfo {
+    /// The IEEE address in v1's colon form, with the endpoint/cluster suffix.
+    pub uniqueid: String,
+    pub name: String,
+    pub manufacturername: String,
+    pub modelid: String,
+    pub swversion: String,
+    pub lastupdated: DateTime<Utc>,
+    pub battery: Option<u8>,
+    pub reachable: bool,
+}
+
+impl ApiSensorInfo {
+    /// The `config` object every battery sensor shares.
+    fn config(&self) -> Value {
+        let mut config = json!({
+            "on": true,
+            "reachable": self.reachable,
+        });
+        if let Some(battery) = self.battery {
+            config["battery"] = json!(battery);
+        }
+        config
+    }
+
+    /// The `state.lastupdated` v1 writes, which is UTC without a suffix.
+    fn lastupdated(&self) -> String {
+        self.lastupdated.format("%Y-%m-%dT%H:%M:%S").to_string()
+    }
+
+    fn row(&self, sensor_type: &str, state: Value) -> ApiSensor {
+        ApiSensor {
+            sensor_type: sensor_type.to_string(),
+            config: self.config(),
+            name: self.name.clone(),
+            state,
+            manufacturername: self.manufacturername.clone(),
+            modelid: self.modelid.clone(),
+            swversion: self.swversion.clone(),
+            swupdate: None,
+            uniqueid: Some(self.uniqueid.clone()),
+            diversityid: None,
+            productname: None,
+            recycle: None,
+            capabilities: Value::Null,
+        }
+    }
+}
+
+impl ApiSensor {
+    /// A motion sensor, as `ZLLPresence`.
+    #[must_use]
+    pub fn zll_presence(info: &ApiSensorInfo, presence: bool) -> Self {
+        info.row(
+            "ZLLPresence",
+            json!({
+                "presence": presence,
+                "lastupdated": info.lastupdated(),
+            }),
+        )
+    }
+
+    /// A temperature sensor, as `ZLLTemperature`.
+    ///
+    /// v1 carries hundredths of a degree, which is the unit a Hue bridge
+    /// answers in; `centi` is already scaled.
+    #[must_use]
+    pub fn zll_temperature(info: &ApiSensorInfo, centi: i32) -> Self {
+        info.row(
+            "ZLLTemperature",
+            json!({
+                "temperature": centi,
+                "lastupdated": info.lastupdated(),
+            }),
+        )
+    }
+
+    /// A light-level sensor, as `ZLLLightLevel`.
+    #[must_use]
+    pub fn zll_light_level(info: &ApiSensorInfo, level: u32) -> Self {
+        info.row(
+            "ZLLLightLevel",
+            json!({
+                "lightlevel": level,
+                "dark": level < LIGHT_LEVEL_DARK,
+                "daylight": level >= LIGHT_LEVEL_DAYLIGHT,
+                "lastupdated": info.lastupdated(),
+            }),
+        )
+    }
+
+    /// A remote, as `ZLLSwitch`.
+    #[must_use]
+    pub fn zll_switch(info: &ApiSensorInfo, buttonevent: u32) -> Self {
+        info.row(
+            "ZLLSwitch",
+            json!({
+                "buttonevent": buttonevent,
+                "lastupdated": info.lastupdated(),
+            }),
+        )
+    }
+
+    /// A contact sensor, as `CLIPGenericStatus`.
+    ///
+    /// The v1 vocabulary has no contact sensor of its own, so the open state
+    /// is the generic status: 1 when the contact is open.
+    #[must_use]
+    pub fn clip_generic_status(info: &ApiSensorInfo, status: u8) -> Self {
+        info.row(
+            "CLIPGenericStatus",
+            json!({
+                "status": status,
+                "lastupdated": info.lastupdated(),
+            }),
+        )
+    }
+}
+
+/// The light level v1 calls dark, and the one it calls daylight.
+pub const LIGHT_LEVEL_DARK: u32 = 12_000;
+pub const LIGHT_LEVEL_DAYLIGHT: u32 = 10_000;
+
+/// An IEEE address in the colon form a v1 `uniqueid` uses, with the
+/// endpoint and cluster suffix a real bridge appends.
+#[must_use]
+pub fn uniqueid(ieee: &str, endpoint: u8, cluster: u16) -> String {
+    let hex = ieee.trim_start_matches("0x");
+    let octets: Vec<String> = (0..hex.len() / 2)
+        .map(|index| hex[index * 2..index * 2 + 2].to_ascii_lowercase())
+        .collect();
+    format!("{}-{endpoint:02x}-{cluster:04x}", octets.join(":"))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiUserConfig {
     pub config: ApiConfig,
@@ -915,6 +1055,10 @@ impl Capabilities {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+
+    use crate::legacy_api::{ApiSensor, ApiSensorInfo, uniqueid};
+
     #[cfg(feature = "mac")]
     #[test]
     fn serialize_lower_case_mac() {
@@ -929,5 +1073,90 @@ mod tests {
         serialize_lower_case_mac(&mac, &mut ser).unwrap();
 
         assert_eq!(res, b"\"01:02:03:aa:bb:cc\"");
+    }
+
+    /// The info every sensor row shares, for the constructor tests.
+    fn info() -> ApiSensorInfo {
+        ApiSensorInfo {
+            uniqueid: uniqueid("0x00158d0000000020", 1, 0x0406),
+            name: "Hall motion".to_string(),
+            manufacturername: "Aqara".to_string(),
+            modelid: "RTCGQ11LM".to_string(),
+            swversion: "1.0".to_string(),
+            lastupdated: Utc::now(),
+            battery: Some(87),
+            reachable: true,
+        }
+    }
+
+    #[test]
+    fn an_ieee_address_becomes_the_colon_form_v1_uses() {
+        assert_eq!(
+            uniqueid("0x00158d0000000020", 1, 0x0406),
+            "00:15:8d:00:00:00:00:20-01-0406"
+        );
+        // the suffix decides the endpoint and cluster, so two clusters of the
+        // same device are two unique ids
+        assert_ne!(
+            uniqueid("0x00158d0000000020", 1, 0x0406),
+            uniqueid("0x00158d0000000020", 1, 0x0402)
+        );
+    }
+
+    #[test]
+    fn every_sensor_class_serializes_under_its_v1_type() {
+        let info = info();
+        let cases = [
+            (
+                ApiSensor::zll_presence(&info, true),
+                "ZLLPresence",
+                "presence",
+            ),
+            (
+                ApiSensor::zll_temperature(&info, 2140),
+                "ZLLTemperature",
+                "temperature",
+            ),
+            (
+                ApiSensor::zll_light_level(&info, 30_000),
+                "ZLLLightLevel",
+                "lightlevel",
+            ),
+            (
+                ApiSensor::zll_switch(&info, 1002),
+                "ZLLSwitch",
+                "buttonevent",
+            ),
+            (
+                ApiSensor::clip_generic_status(&info, 1),
+                "CLIPGenericStatus",
+                "status",
+            ),
+        ];
+
+        for (sensor, sensor_type, reading) in cases {
+            let value = serde_json::to_value(&sensor).unwrap();
+            assert_eq!(value["type"], sensor_type);
+            assert!(value["state"].get(reading).is_some(), "{value}");
+            assert_eq!(value["config"]["battery"], 87, "{value}");
+            assert_eq!(value["config"]["reachable"], true, "{value}");
+            assert_eq!(
+                value["uniqueid"], "00:15:8d:00:00:00:00:20-01-0406",
+                "{value}"
+            );
+            // v1 writes its timestamps without a timezone suffix
+            let lastupdated = value["state"]["lastupdated"].as_str().unwrap();
+            assert!(!lastupdated.ends_with('Z'), "{lastupdated}");
+        }
+    }
+
+    #[test]
+    fn a_sensor_without_a_battery_says_nothing_about_one() {
+        let info = ApiSensorInfo {
+            battery: None,
+            ..info()
+        };
+        let value = serde_json::to_value(ApiSensor::zll_light_level(&info, 1000)).unwrap();
+        assert!(value["config"].get("battery").is_none(), "{value}");
     }
 }

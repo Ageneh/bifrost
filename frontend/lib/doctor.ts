@@ -80,6 +80,11 @@ export interface DoctorInput {
    * the stream status. Absent until the first poll answers.
    */
   streams?: { active: number, max: number }
+  /**
+   * Devices whose battery is below the warning level, when the page has
+   * read the inventory. Absent until the first inventory answer.
+   */
+  lowBattery?: Array<{ name: string, battery: number }>
 }
 
 const Z2M_PREFIX = 'z2m@'
@@ -192,6 +197,21 @@ function attentionRows(input: DoctorInput): AttentionItem[] {
       cause: `zigbee2mqtt at ${name} is configured, but the bridge runs no service for it.`,
       fix: 'Apply the configuration so the bridge starts this backend.',
       action: { kind: 'apply-draft', label: 'Apply' },
+    })
+  }
+
+  const lowBattery = input.lowBattery ?? []
+  if (lowBattery.length > 0) {
+    const names = lowBattery
+      .map(device => `${device.name} (${device.battery} %)`)
+      .join(', ')
+    warnings.push({
+      id: 'battery',
+      severity: 'warn',
+      title: `${plural(lowBattery.length, 'sensor')} ${lowBattery.length === 1 ? 'needs' : 'need'} a battery`,
+      why: names,
+      cause: 'A sensor battery below 15 % is about to stop reporting, and the automation behind it stops with it.',
+      fix: 'Replace the battery in each sensor listed. The reading returns on its own once it reports again.',
     })
   }
 

@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// What a device can do, as far as Bifrost can tell from its exposes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +163,24 @@ pub struct GroupRef {
     pub name: String,
 }
 
+/// The last value one sensor property reported.
+///
+/// The value is already in the semantics the property names: `occupancy` and
+/// `contact` are true when there is motion and when the contact is open, and
+/// `temperature` is degrees Celsius in the unit its expose declares.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export))]
+pub struct SensorReading {
+    /// The z2m property: `occupancy`, `temperature`, `illuminance`,
+    /// `contact` or `action`.
+    pub property: String,
+    /// The value, in the unit the property's expose declares.
+    pub value: Value,
+    /// When the device reported it.
+    pub at: DateTime<Utc>,
+}
+
 /// Everything Bifrost knows about one device.
 ///
 /// Wave 9 extends this additively; no field here may change shape.
@@ -181,7 +200,14 @@ pub struct DeviceInfo {
     pub device_type: DeviceType,
     /// True only where Bifrost can serve the device over the Hue API.
     pub supported: bool,
-    /// Why not, for every unsupported device.
+    /// True when the device is imported into the Hue API right now.
+    ///
+    /// A sensor Bifrost can serve is still not imported until the
+    /// configuration enables it, and the difference is what the Devices
+    /// screen explains.
+    pub imported: bool,
+    /// Why not, for every unsupported device, and for a supported one that
+    /// is not imported.
     pub unsupported_reason: Option<String>,
     pub exposes: Vec<ExposeSummary>,
     pub capabilities: Capabilities,
@@ -192,6 +218,10 @@ pub struct DeviceInfo {
     pub group: Option<GroupRef>,
     /// When the device last reported anything.
     pub last_seen: Option<DateTime<Utc>>,
+    /// The battery level in percent, where the device reports one.
+    pub battery: Option<u8>,
+    /// The last value each sensor property reported, oldest first.
+    pub readings: Vec<SensorReading>,
 }
 
 impl DeviceInfo {

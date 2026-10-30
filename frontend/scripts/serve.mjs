@@ -12,6 +12,7 @@
  *
  * Usage: node scripts/serve.mjs [--port 4319] [--prefix /api/hassio_ingress/test]
  */
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -86,7 +87,10 @@ function device(server, ieee, name, type, supported, overrides = {}) {
     description: null,
     device_type: type,
     supported,
+    imported: supported,
     unsupported_reason: supported ? null : 'Bifrost has no Hue mapping for plugs',
+    battery: null,
+    readings: [],
     exposes: [{ property: 'state', kind: 'binary', access: 7, unit: null, values: ['ON', 'OFF'] }],
     capabilities: {
       dimmable: supported,
@@ -127,12 +131,57 @@ const DEVICES = [
     ],
   }),
   device('office', '0x00158d0000000010', 'Desk plug', 'plug', false),
-  device('office', '0x00158d0000000050', 'Back door', 'contact', false),
+  device('office', '0x00158d0000000050', 'Back door', 'contact', true, {
+    battery: 87,
+    capabilities: { contact: true },
+    readings: [
+      { property: 'contact', value: false, at: new Date(Date.now() - 180_000).toISOString() },
+    ],
+  }),
   // its server is not running: the chain breaks at the z2m hop
-  device('garage', '0x00158d0000000020', 'Hall motion', 'motion', false, {
+  device('garage', '0x00158d0000000020', 'Hall motion', 'motion', true, {
     availability: 'unknown',
+    battery: 64,
+    capabilities: { motion: true },
+    readings: [
+      { property: 'occupancy', value: true, at: new Date(Date.now() - 5_000).toISOString() },
+    ],
+  }),
+  device('office', '0x00158d0000000030', 'Bedroom climate', 'temperature', true, {
+    battery: 12,
+    capabilities: { temperature: true },
+    readings: [
+      { property: 'temperature', value: 21.4, at: new Date(Date.now() - 60_000).toISOString() },
+    ],
+  }),
+  device('office', '0x00158d0000000060', 'Bedside switch', 'remote', true, {
+    battery: 91,
+    capabilities: { action: true },
+    readings: [
+      { property: 'action', value: 'single', at: new Date(Date.now() - 900_000).toISOString() },
+    ],
   }),
 ]
+
+/** Every open console socket, so a test can push an event through one. */
+const consoleSockets = new Set()
+
+/** One text frame, as RFC 6455 frames it. */
+function textFrame(payload) {
+  const body = Buffer.from(JSON.stringify(payload))
+  const header = body.length < 126
+    ? Buffer.from([0x81, body.length])
+    : Buffer.from([0x81, 126, body.length >> 8, body.length & 0xFF])
+  return Buffer.concat([header, body])
+}
+
+/** Push one update to every open console. */
+function broadcast(update) {
+  const frame = textFrame(update)
+  for (const socket of consoleSockets) {
+    socket.write(frame)
+  }
+}
 
 /** The devices the query leaves, as the API filters them. */
 function filteredDevices(search) {
@@ -859,6 +908,25 @@ const server = createServer(async (request, response) => {
 
   // the fixture state is one process, so each test starts from the same
   // draft rather than from whatever the previous test left behind
+  // push one device event to every open console, which is how a live
+  // reading arrives without a real bridge
+  if (rest === '__event' && request.method === 'POST') {
+    const chunks = []
+    for await (const chunk of request) {
+      chunks.push(chunk)
+    }
+    const event = JSON.parse(Buffer.concat(chunks).toString() || '{}')
+    broadcast({
+      DeviceEvent: {
+        ieee: event.ieee ?? '0x00158d0000000020',
+        kind: event.kind ?? 'occupancy',
+        value: event.value ?? true,
+        at: event.at ?? new Date().toISOString(),
+      },
+    })
+    return send(response, 204, '')
+  }
+
   if (rest === '__reset' && request.method === 'POST') {
     setupMode = false
     wizard = { step: 'identity', values: {}, updated_at: null }
@@ -918,6 +986,32 @@ const server = createServer(async (request, response) => {
   }
 
   return sendShell(response)
+})
+
+// the console's one socket: `/bifrost/ws`, upgraded by hand so the fixture
+// needs no dependency
+server.on('upgrade', (request, socket) => {
+  const key = request.headers['sec-websocket-key']
+  if (typeof key !== 'string') {
+    socket.destroy()
+    return
+  }
+  const accept = createHash('sha1')
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest('base64')
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${accept}`,
+    '',
+    '',
+  ].join('\r\n'))
+  consoleSockets.add(socket)
+  socket.on('close', () => consoleSockets.delete(socket))
+  socket.on('error', () => consoleSockets.delete(socket))
+  // nothing the console sends changes the fixture
+  socket.on('data', () => {})
 })
 
 server.listen(port, '127.0.0.1', () => {

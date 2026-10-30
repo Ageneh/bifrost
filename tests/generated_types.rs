@@ -38,9 +38,10 @@ use bifrost_api::entertainment::{
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
     InventorySnapshot, InventoryUpdate, PermitJoinRequest, PermitJoinResponse, PermitJoinState,
-    ResourceRef, RoomRef, ServerInfo,
+    ResourceRef, RoomRef, SensorReading, ServerInfo,
 };
 use bifrost_api::service::{Service, ServiceList};
+use bifrost_api::websocket::DeviceEvent;
 use svc::traits::ServiceState;
 use ts_rs::{Config, TS};
 
@@ -119,6 +120,8 @@ fn export_typescript_bindings() {
     Availability::export_all(&cfg).unwrap();
     Capabilities::export_all(&cfg).unwrap();
     DeviceInfo::export_all(&cfg).unwrap();
+    SensorReading::export_all(&cfg).unwrap();
+    DeviceEvent::export_all(&cfg).unwrap();
     DeviceType::export_all(&cfg).unwrap();
     ExposeSummary::export_all(&cfg).unwrap();
     GroupRef::export_all(&cfg).unwrap();

@@ -22,21 +22,26 @@ test.describe('home, the doctor', () => {
     await page.goto('')
 
     const rows = page.locator('[data-attention]')
-    await expect(rows).toHaveCount(3)
+    await expect(rows).toHaveCount(4)
 
     await expect(rows.nth(0)).toHaveAttribute('data-severity', 'crit')
     await expect(rows.nth(0)).toContainText('garage is not connected')
     await expect(rows.nth(0)).toContainText('Failed')
 
+    // the sensor at 12 % needs a battery before the draft does
     await expect(rows.nth(1)).toHaveAttribute('data-severity', 'warn')
-    await expect(rows.nth(1)).toContainText('1 change waiting to be applied')
-    await expect(rows.nth(1)).toContainText('Warning')
+    await expect(rows.nth(1)).toContainText('1 sensor needs a battery')
+    await expect(rows.nth(1)).toContainText('Bedroom climate (12 %)')
 
-    await expect(rows.nth(2)).toHaveAttribute('data-severity', 'ok')
-    await expect(rows.nth(2)).toContainText('Everything else is healthy')
-    await expect(rows.nth(2)).toContainText('Resolved')
+    await expect(rows.nth(2)).toHaveAttribute('data-severity', 'warn')
+    await expect(rows.nth(2)).toContainText('1 change waiting to be applied')
+    await expect(rows.nth(2)).toContainText('Warning')
 
-    await expect(page.getByTestId('home-attention-panel')).toContainText('2 things need attention')
+    await expect(rows.nth(3)).toHaveAttribute('data-severity', 'ok')
+    await expect(rows.nth(3)).toContainText('Everything else is healthy')
+    await expect(rows.nth(3)).toContainText('Resolved')
+
+    await expect(page.getByTestId('home-attention-panel')).toContainText('3 things need attention')
   })
 
   test('a row opens its cause and fix, with the action that fixes it', async ({ page }) => {
@@ -128,6 +133,15 @@ test.describe('home, the doctor', () => {
     await page.route('**/bifrost/config/draft', route =>
       route.fulfill({ json: { revision: 4, updated_at: null, config: null, validation: [] } }))
     await page.route('**/bifrost/config/diff', route => route.fulfill({ json: [] }))
+    // no device with a low battery in this fixture either
+    await page.route('**/bifrost/devices', route =>
+      route.fulfill({
+        json: {
+          servers: [],
+          devices: [],
+          updated: '2026-10-30T09:00:00Z',
+        },
+      }))
 
     await page.goto('')
 

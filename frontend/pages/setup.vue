@@ -58,9 +58,9 @@ const STEPS: Step[] = [
   },
   {
     key: 'lights',
-    label: 'Lights',
-    title: 'Which lights to serve',
-    why: 'A light you leave out stays on the network and stays out of the Hue app.',
+    label: 'Devices',
+    title: 'Which devices to serve',
+    why: 'A device you leave out stays on the network and stays out of the Hue app. A sensor is opt-in: this is where you opt in.',
   },
   {
     key: 'rooms',
@@ -306,7 +306,7 @@ const summary = computed(() => {
   const lines = [
     `Bridge “${bridge.value.name}” at ${bridge.value.ipaddress || 'no address yet'}`,
     serverUrl.value === '' ? 'No zigbee2mqtt server' : `zigbee2mqtt at ${serverUrl.value}`,
-    `${chosen.value.length} light${chosen.value.length === 1 ? '' : 's'} served`,
+    `${chosen.value.length} device${chosen.value.length === 1 ? '' : 's'} served`,
     `${Object.keys(membership.value).length} room${Object.keys(membership.value).length === 1 ? '' : 's'}`,
     entertainmentLine.value,
   ]
@@ -550,7 +550,7 @@ onMounted(load)
             class="fd-muted"
             data-testid="wizard-lights-empty"
           >
-            No servable light was found. Go back to discovery and ask the server.
+            No servable device was found. Go back to discovery and ask the server.
           </div>
           <ul
             v-else
@@ -566,7 +566,7 @@ onMounted(load)
                 <input
                   type="checkbox"
                   :checked="chosen.includes(device.ieee)"
-                  :data-testid="`wizard-light-${device.ieee}`"
+                  :data-testid="`wizard-device-${device.ieee}`"
                   @change="toggleLight(device.ieee, ($event.target as HTMLInputElement).checked)"
                 >
                 <span>{{ device.friendly_name }}</span>

@@ -62,13 +62,13 @@ test.describe('first run, eight steps', () => {
     await expect(page.getByTestId('wizard-step-count')).toHaveText('4 / 8')
     await page.getByTestId('wizard-discover').click()
     await expect(page.getByTestId('wizard-discovery-list')).toBeVisible()
-    await expect(page.getByTestId('wizard-discovered')).toHaveCount(2)
+    await expect(page.getByTestId('wizard-discovered')).toHaveCount(6)
     await page.getByTestId('wizard-next').click()
 
-    // 5 lights, every servable light chosen by default
+    // 5 devices, every servable one chosen by default
     await expect(page.getByTestId('wizard-step-count')).toHaveText('5 / 8')
-    await expect(page.getByTestId('wizard-light-0x0017880100000001')).toBeChecked()
-    await page.getByTestId('wizard-light-0x0017880100000002').uncheck()
+    await expect(page.getByTestId('wizard-device-0x0017880100000001')).toBeChecked()
+    await page.getByTestId('wizard-device-0x0017880100000002').uncheck()
     await page.getByTestId('wizard-next').click()
 
     // 6 rooms
@@ -84,7 +84,7 @@ test.describe('first run, eight steps', () => {
 
     // 8 review, which is the first and only write
     await expect(page.getByTestId('wizard-step-count')).toHaveText('8 / 8')
-    await expect(page.getByTestId('wizard-summary')).toContainText('1 light served')
+    await expect(page.getByTestId('wizard-summary')).toContainText('5 devices served')
     await expect(page.getByTestId('wizard-summary')).toContainText('A TV with Ambilight+Hue')
     await page.getByTestId('wizard-apply').click()
 

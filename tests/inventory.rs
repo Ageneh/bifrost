@@ -67,11 +67,21 @@ impl Fixture {
 
     /// Start Bifrost against several z2m servers.
     async fn start_with(servers: &[(&str, &str)]) -> Self {
+        Self::start_with_devices(servers, "").await
+    }
+
+    /// Start Bifrost with a `devices:` section in the configuration.
+    async fn start_with_devices(servers: &[(&str, &str)], devices: &str) -> Self {
         let dir = TempDir::new();
-        let servers: String = servers
-            .iter()
-            .map(|(name, url)| format!("  {name}:\n    url: {url}\n"))
-            .collect::<String>();
+        let mut server_lines = String::new();
+        for (name, url) in servers {
+            server_lines.push_str("  ");
+            server_lines.push_str(name);
+            server_lines.push_str(":\n    url: ");
+            server_lines.push_str(url);
+            server_lines.push('\n');
+        }
+        let servers = server_lines;
         let yaml = format!(
             "\
 bridge:
@@ -83,7 +93,8 @@ bridge:
   timezone: UTC
 
 z2m:
-{servers}"
+{servers}
+{devices}"
         );
         let store = Arc::new(ConfigStore::load(&dir.write("config.yaml", &yaml)).unwrap());
         let (svm, _future) = ServiceManager::spawn();
@@ -161,11 +172,11 @@ async fn every_class_is_listed_with_its_type_and_support() {
     for (class, expected, supported) in [
         ("light", DeviceType::Light, true),
         ("plug", DeviceType::Plug, false),
-        ("motion", DeviceType::Motion, false),
-        ("temperature", DeviceType::Temperature, false),
-        ("illuminance", DeviceType::Illuminance, false),
-        ("contact", DeviceType::Contact, false),
-        ("remote", DeviceType::Remote, false),
+        ("motion", DeviceType::Motion, true),
+        ("temperature", DeviceType::Temperature, true),
+        ("illuminance", DeviceType::Illuminance, true),
+        ("contact", DeviceType::Contact, true),
+        ("remote", DeviceType::Remote, true),
     ] {
         let mock = MockZ2m::start_w04(class).await.unwrap();
         let fixture = Fixture::start("server1", mock.url()).await;
@@ -185,13 +196,139 @@ async fn every_class_is_listed_with_its_type_and_support() {
 
         assert_eq!(device.device_type, expected, "{class}: {device:?}");
         assert_eq!(device.supported, supported, "{class}: {device:?}");
-        // every unsupported device says why
+        // nothing but a light is imported by this configuration, and every
+        // device that is not says why
+        assert_eq!(device.imported, class == "light", "{class}: {device:?}");
         assert_eq!(
-            device.unsupported_reason.is_none(),
-            supported,
+            device.unsupported_reason.is_some(),
+            !device.imported,
             "{class}: {device:?}"
         );
     }
+}
+
+/// Product F3: an upgrade must not import every sensor it finds.
+///
+/// The same fixture, twice: once with the configuration an install that
+/// predates this wave has, which names no device, and once with the one line
+/// that opts the sensor in.
+#[tokio::test]
+async fn a_sensor_is_imported_only_when_the_configuration_enables_it() {
+    for (enabled, expect_import) in [(None, false), (Some(true), true)] {
+        let mock = MockZ2m::start_w04("motion").await.unwrap();
+        let devices = enabled.map_or_else(String::new, |value| {
+            format!("devices:\n  \"0x00158d0000000020\":\n    enabled: {value}\n")
+        });
+        let fixture = Fixture::start_with_devices(&[("server1", mock.url())], &devices).await;
+
+        let device = fixture.device("0x00158d0000000020").await;
+
+        assert_eq!(
+            device.imported, expect_import,
+            "enabled={enabled:?}: {device:?}"
+        );
+        assert!(device.supported, "{device:?}");
+        assert_eq!(
+            device.unsupported_reason.is_none(),
+            expect_import,
+            "enabled={enabled:?}: {device:?}"
+        );
+        if !expect_import {
+            assert!(
+                device
+                    .unsupported_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("devices.")),
+                "{device:?}"
+            );
+        }
+
+        // the Hue API carries the motion resource only when it is imported
+        let has_motion = {
+            let res = fixture.state.res.lock().await;
+            !res.get_resources_by_type(hue::api::RType::Motion)
+                .is_empty()
+        };
+        assert_eq!(has_motion, expect_import, "enabled={enabled:?}");
+    }
+}
+
+/// Ticket 183: a remote's press becomes a button event, in the same second.
+#[tokio::test]
+async fn a_remote_press_becomes_a_button_event() {
+    let mock = MockZ2m::start_w04("remote").await.unwrap();
+    // a remote is opt-in like a sensor, so the configuration imports it
+    let devices = "devices:\n  \"0x00158d0000000060\":\n    enabled: true\n";
+    let fixture = Fixture::start_with_devices(&[("server1", mock.url())], devices).await;
+
+    let mut events = fixture.state.device_events().subscribe();
+
+    fixture
+        .wait_until("the remote to be imported", |_| true)
+        .await;
+    // the button resource exists only once the import has run
+    for _ in 0..200 {
+        if fixture
+            .state
+            .res
+            .lock()
+            .await
+            .get_resources_by_type(hue::api::RType::Button)
+            .len()
+            == 1
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let pressed = std::time::Instant::now();
+    mock.publish(
+        "Bedside switch/action",
+        &serde_json::json!({ "action": "single" }),
+    );
+
+    let event = tokio::time::timeout(PATIENCE, async {
+        loop {
+            if let Ok(event) = events.recv().await {
+                if event.kind == "action" {
+                    return event;
+                }
+            }
+        }
+    })
+    .await
+    .expect("an action event within the patience window");
+
+    assert!(
+        pressed.elapsed() < Duration::from_secs(1),
+        "the event was late"
+    );
+    assert_eq!(event.ieee, "0x00158d0000000060");
+    assert_eq!(event.value, serde_json::json!("single"));
+
+    // the same press updates the Hue Button resource the app reads
+    let reported = {
+        let res = fixture.state.res.lock().await;
+        res.get_resources_by_type(hue::api::RType::Button)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                hue::api::Resource::Button(button) => button.button.button_report,
+                _ => None,
+            })
+            .expect("the button resource has a report")
+    };
+    assert_eq!(reported.event, "single");
+
+    // and it is a reading the Devices screen shows
+    let device = fixture.device("0x00158d0000000060").await;
+    assert!(
+        device
+            .readings
+            .iter()
+            .any(|reading| reading.property == "action"),
+        "{device:?}"
+    );
 }
 
 #[tokio::test]
@@ -263,6 +400,83 @@ async fn an_availability_flip_is_visible_in_the_same_second() {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the flip was not visible within a second: {device:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Ticket 184: battery, power and availability, on one sensor.
+#[tokio::test]
+async fn a_sensor_reports_its_battery_and_its_reach() {
+    let mock = MockZ2m::start_w04("motion").await.unwrap();
+    let devices = "devices:\n  \"0x00158d0000000020\":\n    enabled: true\n";
+    let fixture = Fixture::start_with_devices(&[("server1", mock.url())], devices).await;
+
+    fixture.device("0x00158d0000000020").await;
+
+    // the device says it is at 12 %, and reports motion with the same message
+    mock.publish(
+        "Hall motion",
+        &serde_json::json!({ "occupancy": true, "battery": 12, "voltage": 2900 }),
+    );
+
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let device = fixture
+            .inventory()
+            .device("server1", "0x00158d0000000020")
+            .expect("the sensor is listed");
+        if device.battery == Some(12)
+            && device.readings.iter().any(|reading| {
+                reading.property == "occupancy" && reading.value == serde_json::json!(true)
+            })
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the reading never arrived: {device:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // the Hue resource carries the same battery, and names its state
+    let power = {
+        let res = fixture.state.res.lock().await;
+        res.get_resources_by_type(hue::api::RType::DevicePower)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                hue::api::Resource::DevicePower(power) => Some(power),
+                _ => None,
+            })
+            .expect("a DevicePower resource")
+    };
+    assert_eq!(power.power_state["battery_level"], 12);
+    assert_eq!(power.power_state["battery_state"], "low");
+
+    // a device that goes away is not reachable in the Hue API either
+    mock.set_availability("Hall motion", false);
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let reachable = {
+            let res = fixture.state.res.lock().await;
+            res.get_resources_by_type(hue::api::RType::ZigbeeConnectivity)
+                .into_iter()
+                .find_map(|rr| match rr.obj {
+                    hue::api::Resource::ZigbeeConnectivity(zigcon) => Some(matches!(
+                        zigcon.status,
+                        hue::api::ZigbeeConnectivityStatus::Connected
+                    )),
+                    _ => None,
+                })
+                .expect("a ZigbeeConnectivity resource")
+        };
+        if !reachable {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the connectivity never flipped"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }

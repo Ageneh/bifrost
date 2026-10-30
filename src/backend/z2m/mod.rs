@@ -4,6 +4,7 @@ mod bridge_import;
 pub mod discover;
 pub mod entertainment;
 pub mod learn;
+pub mod sensor;
 pub mod websocket;
 pub mod zclcommand;
 
@@ -35,9 +36,11 @@ use z2m::update::DeviceUpdate;
 
 use crate::backend::z2m::entertainment::AreaStream;
 use crate::backend::z2m::learn::SceneLearn;
+use crate::backend::z2m::sensor::SensorKind;
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
+use crate::device_events::DeviceEvents;
 use crate::error::{ApiError, ApiResult};
 use crate::inventory::{GroupRef, Inventory};
 use crate::resource::Resources;
@@ -146,6 +149,7 @@ impl ServiceTemplate for Z2mServiceTemplate {
         )
         .map_err(SvcError::generation)?
         .with_inventory(self.state.inventory())
+        .with_device_events(self.state.device_events())
         .with_streams(self.state.streams())
         .with_commands(self.state.backends());
 
@@ -163,6 +167,12 @@ pub struct Z2mBackend {
     learner: SceneLearn,
     ignore: HashSet<String>,
     network: HashMap<String, z2m::api::Device>,
+    /// The class of every sensor this backend knows, by friendly name.
+    ///
+    /// Kept for every sensor, imported into the Hue API or not: the Devices
+    /// screen shows a reading whether or not the device is served, and an
+    /// opt-in sensor that is not imported must still report.
+    sensors: HashMap<String, SensorKind>,
     /// The z2m group each device belongs to, by IEEE address.
     group_of: HashMap<String, GroupRef>,
     /// The id of each z2m group, by friendly name.
@@ -179,6 +189,9 @@ pub struct Z2mBackend {
     /// Where what this backend learns is published. Absent in a unit test
     /// that drives the backend without one.
     inventory: Option<Arc<Inventory>>,
+    /// Where device reports are published, absent in a unit test that drives
+    /// the backend without one.
+    device_events: Option<Arc<DeviceEvents>>,
     /// Where the entertainment streams are counted, absent in a unit test
     /// that drives the backend without one.
     streams: Option<Arc<StreamRegistry>>,
@@ -209,6 +222,7 @@ impl Z2mBackend {
         let ignore = HashSet::new();
         let learner = SceneLearn::new(name.clone());
         let network = HashMap::new();
+        let sensors = HashMap::new();
         let group_of = HashMap::new();
         let group_ids = HashMap::new();
         let entstreams = BTreeMap::new();
@@ -224,6 +238,7 @@ impl Z2mBackend {
             learner,
             ignore,
             network,
+            sensors,
             group_of,
             group_ids,
             entstreams,
@@ -233,6 +248,7 @@ impl Z2mBackend {
             message_tx,
             socket: None,
             inventory: None,
+            device_events: None,
             streams: None,
             commands: None,
             command_token: None,
@@ -247,6 +263,13 @@ impl Z2mBackend {
     #[must_use]
     pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
         self.inventory = Some(inventory);
+        self
+    }
+
+    /// Publish what this backend's devices report into `events`.
+    #[must_use]
+    pub fn with_device_events(mut self, events: Arc<DeviceEvents>) -> Self {
+        self.device_events = Some(events);
         self
     }
 

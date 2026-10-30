@@ -6,6 +6,7 @@ import type { ExposeSummary } from "./ExposeSummary";
 import type { GroupRef } from "./GroupRef";
 import type { ResourceRef } from "./ResourceRef";
 import type { RoomRef } from "./RoomRef";
+import type { SensorReading } from "./SensorReading";
 
 /**
  * Everything Bifrost knows about one device.
@@ -30,7 +31,16 @@ friendly_name: string, model: string | null, vendor: string | null, description:
  */
 supported: boolean, 
 /**
- * Why not, for every unsupported device.
+ * True when the device is imported into the Hue API right now.
+ *
+ * A sensor Bifrost can serve is still not imported until the
+ * configuration enables it, and the difference is what the Devices
+ * screen explains.
+ */
+imported: boolean, 
+/**
+ * Why not, for every unsupported device, and for a supported one that
+ * is not imported.
  */
 unsupported_reason: string | null, exposes: Array<ExposeSummary>, capabilities: Capabilities, availability: Availability, 
 /**
@@ -40,4 +50,12 @@ resources: Array<ResourceRef>, room: RoomRef | null, group: GroupRef | null,
 /**
  * When the device last reported anything.
  */
-last_seen: string | null, };
+last_seen: string | null, 
+/**
+ * The battery level in percent, where the device reports one.
+ */
+battery: number | null, 
+/**
+ * The last value each sensor property reported, oldest first.
+ */
+readings: Array<SensorReading>, };
