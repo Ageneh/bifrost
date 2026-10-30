@@ -213,14 +213,19 @@ pub async fn put_resource_id(state: &AppState, rlink: ResourceLink, put: Value) 
 
     if let Some(action) = &upd.action {
         let ent: &EntertainmentConfiguration = lock.get(&rlink)?;
+        // every light in the zone, not the first one: an area is what the
+        // owner pointed at, and a zone with no lights yet simply has none
+        // to move
         let svc = ent.light_services.clone();
 
-        lock.update::<Light>(&svc[0].rid, |light| {
-            light.mode = match action {
-                EntertainmentConfigurationAction::Start => LightMode::Streaming,
-                EntertainmentConfigurationAction::Stop => LightMode::Normal,
-            }
-        })?;
+        for link in svc {
+            lock.update::<Light>(&link.rid, |light| {
+                light.mode = match action {
+                    EntertainmentConfigurationAction::Start => LightMode::Streaming,
+                    EntertainmentConfigurationAction::Stop => LightMode::Normal,
+                }
+            })?;
+        }
     }
 
     let bridge_ent = find_bridge_entertainment(&lock)?;
