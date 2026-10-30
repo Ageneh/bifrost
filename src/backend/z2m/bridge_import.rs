@@ -302,7 +302,8 @@ impl Z2mBackend {
         }
 
         let mut metadata = RoomMetadata::new(RoomArchetype::Home, room_name);
-        if let Some(room_conf) = self.config.rooms.get(&topic) {
+        // read the live configuration, so room changes apply without a restart
+        if let Some(room_conf) = self.store.active().rooms.get(&topic) {
             if let Some(name) = &room_conf.name {
                 metadata.name = name.to_string();
             }

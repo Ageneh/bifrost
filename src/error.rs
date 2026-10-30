@@ -47,6 +47,9 @@ pub enum ApiError {
     ConfigError(#[from] config::ConfigError),
 
     #[error(transparent)]
+    ConfigStoreError(#[from] crate::config_store::ConfigStoreError),
+
+    #[error(transparent)]
     QuickXmlSeError(#[from] quick_xml::se::SeError),
 
     #[error(transparent)]

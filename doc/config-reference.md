@@ -1,6 +1,12 @@
 ## Configuration reference
 
-Bifrost
+Bifrost reads `config.yaml` from the working directory. To use another file,
+start Bifrost with `--config <path>`, or set the `BIFROST_CONFIG` environment
+variable. Relative `state_file` and `cert_file` paths resolve against the
+directory of the configuration file.
+
+Settings Bifrost does not recognize are kept: saving the configuration through
+the admin API writes them back unchanged.
 
 ```yaml
 # Bifrost section [optional!]
@@ -79,6 +85,17 @@ z2m:
     #   is the resuling config:
     #
     url: ws://10.00.0.100:8080/api?token=your-secret-token
+
+    # z2m 2.x auth token [optional!]
+    #
+    # If set, this token is used instead of any "token=" in the url.
+    #
+    # A token given in the url keeps working. The first time a configuration
+    # is applied through the admin API, Bifrost moves it from the url to
+    # this field; the resulting websocket url stays the same.
+    #
+    # The token is a secret: the admin API never shows it.
+    token: your-secret-token
 
   other-with-tls:
     # This will work, but Bifrost will generate a warning that the url has been
@@ -176,3 +193,46 @@ rooms:
 
   ...
 ```
+
+## Configuration admin API
+
+Bifrost keeps the active configuration and an optional draft. A draft is
+saved to `config.draft.yaml` next to `config.yaml`, survives a restart, and
+takes effect only when you apply it.
+
+> **Note:** Until authentication lands, every endpoint below except
+> `GET /bifrost/config` answers `403 Forbidden`. A deny-all guard
+> (`require_admin`) covers the admin endpoints, because `/bifrost` accepts
+> unauthenticated requests from any origin. This guard is a stopgap: the
+> next wave replaces it with a real admin check.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /bifrost/config` | Active configuration, with secrets redacted. |
+| `GET /bifrost/config/draft` | Current revision and the draft, if any. |
+| `PUT /bifrost/config/draft` | Replace the draft: `{"revision": n, "config": {...}}`. |
+| `PATCH /bifrost/config/draft` | Change the draft with a JSON merge patch: `{"revision": n, "patch": {...}}`. |
+| `DELETE /bifrost/config/draft` | Discard the draft: `{"revision": n}`. |
+| `GET /bifrost/config/diff` | Settings that differ between the active configuration and the draft. |
+| `GET /bifrost/config/validate` | Findings for the draft, or for the active configuration without one. |
+| `POST /bifrost/config/validate` | Findings for the configuration in the request body. |
+| `POST /bifrost/config/apply` | Apply the draft: `{"revision": n}`. Returns the apply plan. |
+| `POST /bifrost/config/restart` | Apply the draft (if any, naming its revision), then exit so the supervisor restarts Bifrost. |
+| `GET /bifrost/config/export` | Active configuration as YAML, with secrets redacted. |
+| `POST /bifrost/config/import` | Replace the draft from YAML: `{"revision": n, "yaml": "..."}`. |
+
+Every write names the revision it was based on. A stale revision fails with
+`409 Conflict`; read the draft again and retry.
+
+Applying writes `config.yaml.bak` first, then `config.yaml`. The new file is
+generated, so comments from the old one are not carried over; they remain in
+`config.yaml.bak`. The response
+lists which changes took effect immediately (`hot`) and which need a restart
+(`restart_required`). Port and address changes restart the affected
+listeners, and z2m server changes start, stop or re-create that backend. The
+bridge MAC address and the `state_file` and `cert_file` paths take effect
+only after a restart.
+
+Secrets (z2m tokens, password hashes) are write-only. Reads show
+`<<REDACTED>>` for a secret that is set. On write, an absent, `null` or
+`<<REDACTED>>` secret keeps the existing value, and `""` clears it.
