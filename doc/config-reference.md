@@ -82,6 +82,23 @@ bifrost:
     # you reach Bifrost under your own DNS name.
     allowed_hosts: ["bifrost.home.lan"]
 
+  # Entertainment streaming [optional!]
+  #
+  # Bifrost runs one DTLS session per area. A real Hue bridge advertises one
+  # stream at a time; two are what a TV running Ambilight+Hue and a second
+  # Sync client need together, which is why that is the default.
+  entertainment:
+    # how many clients may stream at the same time
+    #
+    # A further client is refused: it never completes the DTLS handshake,
+    # and the streams that are running are not disturbed.
+    #
+    # The value is also written into the bridge's own `Entertainment`
+    # resource in `state.yaml` when Bifrost starts, because clients read it
+    # there to decide how many streams they may open. Changing the setting
+    # updates both, without a restart.
+    max_streams: 2
+
 # Bridge section
 #
 # Settings for hue bridge emulation

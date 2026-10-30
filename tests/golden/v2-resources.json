@@ -166,7 +166,7 @@
     {
       "equalizer": false,
       "id": "3602520b-d2f3-5725-aa13-48f62d1d4b7a",
-      "max_streams": 1,
+      "max_streams": 2,
       "owner": {
         "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
         "rtype": "device"
