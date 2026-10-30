@@ -17,7 +17,10 @@
 //!
 //! A test drives the mock through [`MockZ2m::publish`], reads what Bifrost
 //! sent with [`MockZ2m::received`], and waits for one message with
-//! [`MockZ2m::wait_for`].
+//! [`MockZ2m::wait_for`]. The wave-4 additions speak what z2m speaks when a
+//! device leaves ([`MockZ2m::remove_device`]), when one is reachable or not
+//! ([`MockZ2m::set_availability`]), and when the server itself goes away
+//! ([`MockZ2m::drop_connection`]).
 
 // every test binary compiles its own copy of this module, and each uses a
 // different part of the handle
@@ -44,9 +47,13 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 /// State every connection shares.
 struct Shared {
     greeting: Vec<String>,
+    /// The friendly name of every device the greeting announces, by address.
+    names: std::collections::HashMap<String, String>,
     received: Mutex<Vec<RawMessage>>,
     connections: AtomicUsize,
     outbound: broadcast::Sender<String>,
+    /// Tells every open connection to hang up, as a server going away does.
+    hang_up: broadcast::Sender<()>,
     changed: Notify,
 }
 
@@ -72,8 +79,10 @@ impl MockZ2m {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
         let (outbound, _) = broadcast::channel(64);
+        let (hang_up, _) = broadcast::channel(8);
 
         let shared = Arc::new(Shared {
+            names: device_names(&messages),
             greeting: messages
                 .iter()
                 .map(serde_json::to_string)
@@ -81,6 +90,7 @@ impl MockZ2m {
             received: Mutex::new(vec![]),
             connections: AtomicUsize::new(0),
             outbound,
+            hang_up,
             changed: Notify::new(),
         });
 
@@ -98,6 +108,18 @@ impl MockZ2m {
         Self::start(&fixture_path("w03/z2m/bridge.json")).await
     }
 
+    /// Start the mock on the wave-4 fixture for one device class,
+    /// `tests/fixtures/w04/devices-<class>.json`.
+    pub async fn start_w04(class: &str) -> Result<Self> {
+        Self::start(&fixture_path(&format!("w04/devices-{class}.json"))).await
+    }
+
+    /// The friendly names of the devices the greeting announces.
+    #[must_use]
+    pub fn device_names(&self) -> Vec<String> {
+        self.shared.names.values().cloned().collect()
+    }
+
     /// The websocket url Bifrost is configured with.
     #[must_use]
     pub fn url(&self) -> &str {
@@ -110,6 +132,40 @@ impl MockZ2m {
         let message = json!({"topic": topic, "payload": payload});
         // a send error only means no client is connected right now
         let _ = self.shared.outbound.send(message.to_string());
+    }
+
+    /// Announce that the device with `ieee` left the network, exactly as z2m
+    /// does on a `bridge/event`.
+    pub fn remove_device(&self, ieee: &str) {
+        let friendly_name = self
+            .shared
+            .names
+            .get(ieee)
+            .cloned()
+            .unwrap_or_else(|| ieee.to_string());
+
+        self.publish(
+            "bridge/event",
+            &json!({
+                "type": "device_removed",
+                "data": {"ieee_address": ieee, "friendly_name": friendly_name},
+            }),
+        );
+    }
+
+    /// Report a device as reachable or not, on its availability topic.
+    pub fn set_availability(&self, friendly_name: &str, online: bool) {
+        let state = if online { "online" } else { "offline" };
+        self.publish(
+            &format!("{friendly_name}/availability"),
+            &json!({"state": state}),
+        );
+    }
+
+    /// Hang up on every connected client and stop accepting, which is what a
+    /// z2m server that dies looks like from Bifrost's side.
+    pub fn drop_connection(&self) {
+        let _ = self.shared.hang_up.send(());
     }
 
     /// How many clients have connected since the mock started; a backend
@@ -185,6 +241,31 @@ impl Drop for MockZ2m {
     }
 }
 
+/// The friendly name of every device a greeting announces, by address.
+fn device_names(messages: &[RawMessage]) -> std::collections::HashMap<String, String> {
+    let mut names = std::collections::HashMap::new();
+
+    for message in messages {
+        if message.topic != "bridge/devices" {
+            continue;
+        }
+        let Some(devices) = message.payload.as_array() else {
+            continue;
+        };
+        for device in devices {
+            let (Some(ieee), Some(name)) = (
+                device.get("ieee_address").and_then(Value::as_str),
+                device.get("friendly_name").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            names.insert(ieee.to_string(), name.to_string());
+        }
+    }
+
+    names
+}
+
 /// Read a fixture: a JSON array of `{"topic", "payload"}` objects.
 fn read_fixture(fixture: &Utf8Path) -> Result<Vec<RawMessage>> {
     let text = std::fs::read_to_string(fixture)
@@ -214,6 +295,7 @@ async fn serve(stream: TcpStream, shared: Arc<Shared>) -> Result<()> {
     let mut socket = tokio_tungstenite::accept_async(stream).await?;
     shared.connections.fetch_add(1, Ordering::SeqCst);
     let mut outbound = shared.outbound.subscribe();
+    let mut hang_up = shared.hang_up.subscribe();
 
     for message in &shared.greeting {
         send_text(&mut socket, message).await?;
@@ -237,6 +319,7 @@ async fn serve(stream: TcpStream, shared: Arc<Shared>) -> Result<()> {
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
                 }
             }
+            _ = hang_up.recv() => return Ok(()),
         }
     }
 }
