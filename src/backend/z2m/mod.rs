@@ -61,6 +61,12 @@ pub enum Z2mCommand {
         seconds: u32,
         reply: oneshot::Sender<ApiResult<()>>,
     },
+    /// Open this server's join window, and no other server's.
+    PermitJoin {
+        time: u32,
+        device: Option<String>,
+        reply: oneshot::Sender<ApiResult<()>>,
+    },
 }
 
 /// The command channel of every running backend, by server name.
@@ -300,6 +306,14 @@ impl Z2mBackend {
                 reply,
             } => {
                 let result = z2mws.send_identify(&device, seconds).await;
+                let _ = reply.send(result);
+            }
+            Z2mCommand::PermitJoin {
+                time,
+                device,
+                reply,
+            } => {
+                let result = z2mws.send_permit_join(time, device).await;
                 let _ = reply.send(result);
             }
         }

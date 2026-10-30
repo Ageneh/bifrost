@@ -71,7 +71,7 @@ impl Fixture {
         let servers: String = servers
             .iter()
             .map(|(name, url)| format!("  {name}:\n    url: {url}\n"))
-            .collect();
+            .collect::<String>();
         let yaml = format!(
             "\
 bridge:
@@ -381,6 +381,40 @@ async fn the_websocket_carries_the_inventory_and_every_change() {
     })
     .await;
     assert_eq!(removed["server"], "server1");
+}
+
+#[tokio::test]
+async fn permit_join_sends_the_exact_payload_to_one_server() {
+    use axum::body::Body;
+    use axum::http::{Method, Request, header};
+    use tower::ServiceExt;
+
+    let first = MockZ2m::start_w04("light").await.unwrap();
+    let second = MockZ2m::start_w04("light").await.unwrap();
+    let fixture = Fixture::start_with(&[("a", first.url()), ("b", second.url())]).await;
+    fixture
+        .wait_until("both servers' devices", |devices| devices.len() == 4)
+        .await;
+
+    let router = bifrost::routes::bifrost::z2m::router().with_state(fixture.state.clone());
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/a/permit_join")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"time": 60}"#))
+        .unwrap();
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200, "the permit join was refused");
+
+    // the payload z2m receives, exactly
+    let sent = first.wait_for("bridge/request/permit_join").await;
+    assert_eq!(sent, serde_json::json!({"time": 60, "device": null}));
+
+    // the other server was never asked to open a window
+    assert!(
+        second.received_on("bridge/request/permit_join").is_empty(),
+        "the permit join was broadcast to every server"
+    );
 }
 
 #[tokio::test]

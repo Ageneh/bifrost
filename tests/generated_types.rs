@@ -23,8 +23,8 @@ use bifrost_api::config::{
 };
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
-    InventorySnapshot, InventoryUpdate, PermitJoinResponse, PermitJoinState, ResourceRef, RoomRef,
-    ServerInfo,
+    InventorySnapshot, InventoryUpdate, PermitJoinRequest, PermitJoinResponse, PermitJoinState,
+    ResourceRef, RoomRef, ServerInfo,
 };
 use bifrost_api::service::{Service, ServiceList};
 use svc::traits::ServiceState;
@@ -92,6 +92,7 @@ fn export_typescript_bindings() {
     IdentifyRequest::export_all(&cfg).unwrap();
     InventorySnapshot::export_all(&cfg).unwrap();
     InventoryUpdate::export_all(&cfg).unwrap();
+    PermitJoinRequest::export_all(&cfg).unwrap();
     PermitJoinResponse::export_all(&cfg).unwrap();
     PermitJoinState::export_all(&cfg).unwrap();
     ResourceRef::export_all(&cfg).unwrap();

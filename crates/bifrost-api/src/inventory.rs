@@ -204,7 +204,7 @@ impl DeviceInfo {
 }
 
 /// The join window a server has open, as z2m last reported it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct PermitJoinState {
@@ -301,12 +301,25 @@ pub struct IdentifyRequest {
     pub seconds: Option<u32>,
 }
 
-/// The answer to a permit-join request.
+/// What a screen asks of a server's join window.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(export))]
+pub struct PermitJoinRequest {
+    /// How long the window should stay open, in seconds. Absent means the
+    /// bridge's default.
+    pub time: Option<u32>,
+    /// Restrict the window to one device, by friendly name.
+    pub device: Option<String>,
+}
+
+/// The answer to a permit-join request, and the state of the window.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct PermitJoinResponse {
     pub server: String,
+    /// Seconds left in the window; zero when none is open.
     pub time: u32,
     pub device: Option<String>,
 }
