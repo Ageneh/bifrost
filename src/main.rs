@@ -24,6 +24,10 @@ struct Args {
     /// Configuration file [default: `$BIFROST_CONFIG`, or `config.yaml`]
     #[arg(long)]
     config: Option<Utf8PathBuf>,
+
+    /// Serve the web UI from this directory instead of the embedded copy
+    #[arg(long)]
+    ui_dir: Option<Utf8PathBuf>,
 }
 
 impl Args {
@@ -169,7 +173,11 @@ async fn run(config_file: Utf8PathBuf) -> ApiResult<()> {
 
 #[tokio::main]
 async fn main() {
-    let config_file = Args::parse().config_file();
+    let args = Args::parse();
+    if let Some(dir) = args.ui_dir.clone() {
+        bifrost::routes::ui::serve_from_directory(dir);
+    }
+    let config_file = args.config_file();
 
     if let Err(err) = run(config_file).await {
         log::error!("Bifrost error: {err}");

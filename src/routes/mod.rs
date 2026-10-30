@@ -19,6 +19,7 @@ pub mod clip;
 pub mod eventstream;
 pub mod extractor;
 pub mod licenses;
+pub mod ui;
 pub mod updater;
 pub mod upnp;
 
@@ -169,6 +170,7 @@ pub fn router(appstate: AppState) -> Router<()> {
         .nest("/clip/v2/resource", clip::router())
         .nest("/eventstream", eventstream::router())
         .nest("/bifrost", bifrost::router())
+        .fallback(ui::fallback)
         .with_state(appstate)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
 }

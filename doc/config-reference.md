@@ -236,3 +236,23 @@ only after a restart.
 Secrets (z2m tokens, password hashes) are write-only. Reads show
 `<<REDACTED>>` for a secret that is set. On write, an absent, `null` or
 `<<REDACTED>>` secret keeps the existing value, and `""` clears it.
+
+### Web UI
+
+Bifrost serves its web UI from `/` on the HTTP and HTTPS ports. Paths that
+belong to the Hue API and the admin API (`/api`, `/auth`, `/bifrost`,
+`/clip`, `/description.xml`, `/eventstream`, `/licenses`, `/updater`) never
+return the UI: a path no route matches under one of them is an empty
+`404 Not Found`.
+
+The UI is built into the binary by the default `ui` Cargo feature, from
+`frontend/.output/public`. To serve a build from disk instead, start Bifrost
+with `--ui-dir <path>`. A binary built without a UI answers `/` with a
+plain-text `404`.
+
+Behind a reverse proxy that serves Bifrost under a path prefix, such as Home
+Assistant ingress, the proxy sends the prefix in the `X-Ingress-Path` header.
+Bifrost writes it into the page as `<base href>` and as
+`window.__BIFROST_BASE__`, both ending in `/`, so asset and API URLs resolve
+under the prefix. A header value that is not a plain absolute path is
+ignored, and the page uses `/`.
