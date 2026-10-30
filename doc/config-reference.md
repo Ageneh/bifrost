@@ -296,6 +296,36 @@ No admin password is set. Open Bifrost in a browser and enter this setup code to
 With Docker, `docker logs` shows it. Enter the code and a password of at
 least eight characters in the web interface. Each start prints a new code.
 
+### Setup mode
+
+When the configuration file is missing or cannot be read, Bifrost does not
+exit. It starts in setup mode: the Hue bridge stays off, and only the admin
+login and a configuration draft are served, on port 80 of the address of the
+default network route. Choose another address with `--setup-listen
+<address:port>` or the `BIFROST_SETUP_LISTEN` environment variable. Bifrost
+prints a setup code to standard output, as on a first start:
+
+```
+Bifrost is in setup mode. Open http://10.0.0.12:80/ in a browser and enter this setup code: ABCD-EFGH-JKLM
+```
+
+Setup mode answers to its IP address only, not to a host name. Every
+endpoint except the login needs a session, and the first session needs the
+setup code and sets the admin password. Then:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /bifrost/setup/status` | The configuration file, why it could not be used, and whether `config.yaml.bak` exists. |
+| `POST /bifrost/setup/restore` | Load `config.yaml.bak` into the draft: `{"revision": n}`. |
+| `GET`/`PUT`/`PATCH`/`DELETE /bifrost/config/draft` | The draft, as on a running bridge; it may be incomplete. |
+| `GET`/`POST /bifrost/config/validate` | Findings for the draft, or for the posted document. |
+| `POST /bifrost/config/import` | Replace the draft from YAML. |
+| `POST /bifrost/config/apply` | Write the draft, with the new password, as the configuration file and start the bridge. |
+
+Applying keeps an unreadable file as `config.yaml.broken` and leaves
+`config.yaml.bak` alone. Bifrost then starts the bridge in the same process,
+and the session from setup mode stays logged in.
+
 ### Lost password
 
 There is no reset by email or command-line flag. To reset the password:

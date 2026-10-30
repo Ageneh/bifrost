@@ -152,13 +152,13 @@ impl Fixture {
     }
 }
 
-fn routes_dir() -> Utf8PathBuf {
+pub(crate) fn routes_dir() -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/routes")
 }
 
 /// String literals passed to `call(` in `source`, e.g. every
 /// `.route("/x", ...)` path.
-fn literal_arguments(source: &str, call: &str) -> Vec<String> {
+pub(crate) fn literal_arguments(source: &str, call: &str) -> Vec<String> {
     let mut found = vec![];
     let mut rest = source;
     while let Some(offset) = rest.find(call) {
@@ -219,13 +219,18 @@ fn scan_bifrost_routes() -> Vec<String> {
     for entry in fs::read_dir(&bifrost_dir).unwrap() {
         let path = Utf8PathBuf::from_path_buf(entry.unwrap().path()).unwrap();
         let module = path.file_stem().unwrap().to_string();
-        if module == "mod" || module == "tests" {
+        // setup mode is a router of its own; its tests enumerate it
+        if module == "mod" || module == "tests" || module == "setup" {
             continue;
         }
         let source = fs::read_to_string(&path).unwrap();
-        let routes = literal_arguments(&source, ".route(");
+        // the routes, not a test module's request strings
+        let source = source
+            .find("#[cfg(test)]")
+            .map_or(source.as_str(), |end| &source[..end]);
+        let routes = literal_arguments(source, ".route(");
         assert!(
-            literal_arguments(&source, ".nest(").is_empty(),
+            literal_arguments(source, ".nest(").is_empty(),
             "{path}: nested routers below /bifrost/{module} are not understood by this scan; extend it"
         );
         if routes.is_empty() {
@@ -272,7 +277,7 @@ fn scan_outside(dir: &Utf8Path, skip: &Utf8Path, paths: &mut Vec<String>) {
 }
 
 /// A concrete uri for a route path with `{param}` captures.
-fn concrete(path: &str) -> String {
+pub(crate) fn concrete(path: &str) -> String {
     path.split('/')
         .map(|segment| {
             if segment.starts_with('{') {

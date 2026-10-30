@@ -2,10 +2,11 @@ pub mod auth;
 pub mod backend;
 pub mod config;
 pub mod service;
+pub mod setup;
 pub mod websocket;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 use std::error::Error;
 
@@ -25,8 +26,8 @@ use url::Url;
 use bifrost_api::admin::ErrorResponse;
 use bifrost_api::admin::auth::CSRF_HEADER;
 
-use crate::auth::secrets_match;
-use crate::config::AppConfig;
+use crate::auth::{Auth, secrets_match};
+use crate::config::{AppConfig, AuthConfig};
 use crate::routes::bifrost::auth::{Client, TrustedIngress};
 use crate::routes::bifrost::websocket::websocket;
 use crate::routes::extractor::Json;
@@ -71,7 +72,8 @@ const PUBLIC_ROUTES: &[(Method, &str)] = &[
     (Method::POST, "/auth/setup"),
 ];
 
-fn refuse(status: StatusCode, error: &str) -> Response {
+#[must_use]
+pub fn refuse(status: StatusCode, error: &str) -> Response {
     (
         status,
         Json(ErrorResponse {
@@ -106,7 +108,7 @@ fn request_authority(parts: &Parts) -> Option<String> {
 /// Host names the admin interface answers to: the bridge address, its mDNS
 /// name, and the configured extras. Refusing every other name is what stops
 /// DNS rebinding, where an attacker's domain resolves to this bridge.
-fn host_allowed(host: &str, config: &AppConfig) -> bool {
+fn bridge_host_allowed(host: &str, config: &AppConfig) -> bool {
     host == config.bridge.ipaddress.to_string()
         || host == mdns::host_name(config.bridge.mac)
         || config
@@ -133,7 +135,7 @@ fn request_origin(parts: &Parts) -> Option<Url> {
 
 /// A mutation, or a websocket upgrade, must come from a page served by this
 /// bridge: same host and same port.
-fn origin_allowed(parts: &Parts, config: &AppConfig) -> bool {
+fn origin_allowed(parts: &Parts, host_allowed: &dyn Fn(&str) -> bool) -> bool {
     let (Some(origin), Some(authority)) = (request_origin(parts), request_authority(parts)) else {
         return false;
     };
@@ -156,7 +158,7 @@ fn origin_allowed(parts: &Parts, config: &AppConfig) -> bool {
 
     matches!(origin.scheme(), "http" | "https")
         && origin_host == host
-        && host_allowed(&host, config)
+        && host_allowed(&host)
         && same_port
 }
 
@@ -168,7 +170,8 @@ fn is_websocket_upgrade(parts: &Parts) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
 }
 
-/// The access guard over every route under `/bifrost`.
+/// The access decision for every route under `/bifrost`, in running and in
+/// setup mode.
 ///
 /// In order: an Ingress claim is refused unless it comes from a trusted
 /// peer, which then skips the login; the `Host` must be one of this
@@ -176,22 +179,19 @@ fn is_websocket_upgrade(parts: &Parts) -> bool {
 /// every mutation and websocket upgrade needs an allowed `Origin`, a
 /// mutation with a session also the session's `X-Bifrost-Csrf`.
 ///
-/// The request passes through untouched, so the websocket upgrade still
-/// works behind it.
-pub async fn require_admin(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let (mut parts, body) = request.into_parts();
-    let Some(client) = Client::from_parts(&parts) else {
-        return refuse(
+/// Returns the refusal, or `None` to let the request through.
+pub fn check_access(
+    parts: &mut Parts,
+    sessions: &Auth,
+    auth: &AuthConfig,
+    host_allowed: &dyn Fn(&str) -> bool,
+) -> Option<Response> {
+    let Some(client) = Client::from_parts(parts) else {
+        return Some(refuse(
             StatusCode::INTERNAL_SERVER_ERROR,
             "The client address is unknown",
-        );
+        ));
     };
-    let config = state.config();
-    let auth = &config.bifrost.auth;
 
     // decided by the connecting address only: every header is client-set
     let trusted_peer = auth.trust_ingress
@@ -205,44 +205,53 @@ pub async fn require_admin(
             "Refused an Ingress request from untrusted peer {}",
             client.ip
         );
-        return refuse(
+        return Some(refuse(
             StatusCode::FORBIDDEN,
             "Ingress requests are only accepted from the Home Assistant Supervisor",
-        );
+        ));
     }
 
     if ingress {
         parts.extensions.insert(TrustedIngress);
-        return next.run(Request::from_parts(parts, body)).await;
+        return None;
     }
 
-    let host = request_authority(&parts).map(|authority| split_authority(&authority).0);
-    if !host.is_some_and(|host| host_allowed(&host, &config)) {
-        return refuse(
+    let host = request_authority(parts).map(|authority| split_authority(&authority).0);
+    if !host.is_some_and(|host| host_allowed(&host)) {
+        return Some(refuse(
             StatusCode::FORBIDDEN,
             "Unknown host name; add it to bifrost.auth.allowed_hosts to use it",
-        );
+        ));
     }
 
     let mutation = !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS);
-    let needs_origin = mutation || is_websocket_upgrade(&parts);
+    let needs_origin = mutation || is_websocket_upgrade(parts);
     let public = PUBLIC_ROUTES
         .iter()
         .any(|(method, path)| parts.method == method && parts.uri.path() == *path);
 
     if public {
-        if needs_origin && !origin_allowed(&parts, &config) {
-            return refuse(StatusCode::FORBIDDEN, "Cross-origin request refused");
+        if needs_origin && !origin_allowed(parts, host_allowed) {
+            return Some(refuse(
+                StatusCode::FORBIDDEN,
+                "Cross-origin request refused",
+            ));
         }
-        return next.run(Request::from_parts(parts, body)).await;
+        return None;
     }
 
-    let Some(csrf) = client.session(&state, &config) else {
-        return refuse(StatusCode::UNAUTHORIZED, "Log in to use the admin API");
+    let Some(csrf) = client.session(sessions, auth) else {
+        return Some(refuse(
+            StatusCode::UNAUTHORIZED,
+            "Log in to use the admin API",
+        ));
     };
 
-    if needs_origin && !origin_allowed(&parts, &config) {
-        return refuse(StatusCode::FORBIDDEN, "Cross-origin request refused");
+    if needs_origin && !origin_allowed(parts, host_allowed) {
+        return Some(refuse(
+            StatusCode::FORBIDDEN,
+            "Cross-origin request refused",
+        ));
     }
 
     if mutation {
@@ -252,17 +261,42 @@ pub async fn require_admin(
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
         if !secrets_match(presented, &csrf) {
-            return refuse(
+            return Some(refuse(
                 StatusCode::FORBIDDEN,
                 "Missing or wrong X-Bifrost-Csrf header",
-            );
+            ));
         }
     }
 
-    next.run(Request::from_parts(parts, body)).await
+    None
 }
 
-async fn not_found() -> Response {
+/// The access guard over every route under `/bifrost`; see
+/// [`check_access`].
+///
+/// The request passes through untouched, so the websocket upgrade still
+/// works behind it.
+pub async fn require_admin(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let (mut parts, body) = request.into_parts();
+    let config = state.config();
+    let host_allowed = |host: &str| bridge_host_allowed(host, &config);
+
+    match check_access(
+        &mut parts,
+        &state.auth(),
+        &config.bifrost.auth,
+        &host_allowed,
+    ) {
+        None => next.run(Request::from_parts(parts, body)).await,
+        Some(refusal) => refusal,
+    }
+}
+
+pub async fn not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
         Json(ErrorResponse {

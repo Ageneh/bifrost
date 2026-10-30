@@ -5,6 +5,7 @@
 //! and errors carry fixed messages only.
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
@@ -20,8 +21,8 @@ use bifrost_api::admin::auth::{
     LoginRequest, LogoutRequest, PasswordChange, SESSION_COOKIE, SessionResponse, SetupRequest,
 };
 
-use crate::auth::{AuthError, Expiry, NewSession, check_password_policy, verify_password};
-use crate::config::AppConfig;
+use crate::auth::{Auth, AuthError, Expiry, NewSession, check_password_policy, verify_password};
+use crate::config::AuthConfig;
 use crate::config_store::ConfigStoreError;
 use crate::routes::extractor::Json;
 use crate::server::Protocol;
@@ -67,11 +68,9 @@ impl Client {
     /// The CSRF token of the presented session, when it is live and bound
     /// to this client's address.
     #[must_use]
-    pub fn session(&self, state: &AppState, config: &AppConfig) -> Option<String> {
+    pub fn session(&self, auth: &Auth, config: &AuthConfig) -> Option<String> {
         let token = self.session_token.as_deref()?;
-        state
-            .auth()
-            .session(token, self.ip, Expiry::from_config(&config.bifrost.auth))
+        auth.session(token, self.ip, Expiry::from_config(config))
     }
 }
 
@@ -190,13 +189,13 @@ impl IntoResponse for AuthApiError {
 type AuthApiResult<T> = Result<T, AuthApiError>;
 
 const fn session_response(
-    config: &AppConfig,
+    config: &AuthConfig,
     client: &Client,
     csrf: Option<String>,
 ) -> SessionResponse {
     SessionResponse {
         authenticated: csrf.is_some() || client.ingress,
-        setup_required: config.bifrost.auth.password_hash.is_none(),
+        setup_required: config.password_hash.is_none(),
         ingress: client.ingress,
         csrf,
     }
@@ -204,10 +203,8 @@ const fn session_response(
 
 /// The reply to a request that started `session`: its cookie, and the
 /// session state with the CSRF token.
-fn new_session_reply(config: &AppConfig, client: &Client, session: NewSession) -> Response {
-    let max_age = Expiry::from_config(&config.bifrost.auth)
-        .absolute
-        .num_seconds();
+fn new_session_reply(config: &AuthConfig, client: &Client, session: NewSession) -> Response {
+    let max_age = Expiry::from_config(config).absolute.num_seconds();
     let body = session_response(config, client, Some(session.csrf));
     (
         [(SET_COOKIE, cookie(&session.token, max_age, client.tls))],
@@ -219,17 +216,15 @@ fn new_session_reply(config: &AppConfig, client: &Client, session: NewSession) -
 /// Verify `password` against the configured hash off the executor, counting
 /// a failure against the client's backoff.
 async fn check_password(
-    state: &AppState,
-    config: &AppConfig,
+    host: &impl AuthHost,
+    config: &AuthConfig,
     client: &Client,
     password: String,
 ) -> AuthApiResult<()> {
-    let auth = state.auth();
+    let auth = host.auth();
     auth.check_backoff(client.ip)?;
 
     let hash = config
-        .bifrost
-        .auth
         .password_hash
         .clone()
         .ok_or(AuthError::SetupRequired)?;
@@ -245,27 +240,27 @@ async fn check_password(
 }
 
 /// Hash a new password off the executor.
-async fn hash_new_password(state: &AppState, password: String) -> AuthApiResult<String> {
+async fn hash_new_password(host: &impl AuthHost, password: String) -> AuthApiResult<String> {
     check_password_policy(&password)?;
-    let auth = state.auth();
+    let auth = host.auth();
     Ok(tokio::task::spawn_blocking(move || auth.hash_password(&password)).await??)
 }
 
-async fn get_session(State(state): State<AppState>, client: Client) -> Json<SessionResponse> {
-    let config = state.config();
-    let csrf = client.session(&state, &config);
+async fn get_session<H: AuthHost>(State(host): State<H>, client: Client) -> Json<SessionResponse> {
+    let config = host.auth_config();
+    let csrf = client.session(&host.auth(), &config);
     Json(session_response(&config, &client, csrf))
 }
 
-async fn post_setup(
-    State(state): State<AppState>,
+async fn post_setup<H: AuthHost>(
+    State(host): State<H>,
     client: Client,
     Json(req): Json<SetupRequest>,
 ) -> AuthApiResult<Response> {
-    let auth = state.auth();
+    let auth = host.auth();
     auth.check_backoff(client.ip)?;
 
-    if state.config().bifrost.auth.password_hash.is_some() {
+    if host.auth_config().password_hash.is_some() {
         return Err(AuthError::AlreadySetUp.into());
     }
 
@@ -277,15 +272,8 @@ async fn post_setup(
         return Err(AuthError::WrongSetupCode.into());
     }
 
-    let hash = hash_new_password(&state, req.password).await?;
-    let set = state.store().update_auth(|config| {
-        if config.password_hash.is_some() {
-            return false;
-        }
-        config.password_hash = Some(hash);
-        true
-    })?;
-    if !set {
+    let hash = hash_new_password(&host, req.password).await?;
+    if !host.set_password_hash(hash, true)? {
         return Err(AuthError::AlreadySetUp.into());
     }
 
@@ -294,41 +282,41 @@ async fn post_setup(
     auth.revoke_all()?;
     log::info!("Admin password set from {}", client.ip);
 
-    let config = state.config();
-    let session = auth.create_session(client.ip, Expiry::from_config(&config.bifrost.auth))?;
+    let config = host.auth_config();
+    let session = auth.create_session(client.ip, Expiry::from_config(&config))?;
     Ok(new_session_reply(&config, &client, session))
 }
 
-async fn post_login(
-    State(state): State<AppState>,
+async fn post_login<H: AuthHost>(
+    State(host): State<H>,
     client: Client,
     Json(req): Json<LoginRequest>,
 ) -> AuthApiResult<Response> {
-    let config = state.config();
-    check_password(&state, &config, &client, req.password).await?;
+    let config = host.auth_config();
+    check_password(&host, &config, &client, req.password).await?;
 
-    let auth = state.auth();
+    let auth = host.auth();
     // a new token on every login, so a token planted before login is useless
     if let Some(old) = &client.session_token {
         auth.revoke(old)?;
     }
-    let session = auth.create_session(client.ip, Expiry::from_config(&config.bifrost.auth))?;
+    let session = auth.create_session(client.ip, Expiry::from_config(&config))?;
     log::info!("Admin login from {}", client.ip);
 
     Ok(new_session_reply(&config, &client, session))
 }
 
-async fn post_logout(
-    State(state): State<AppState>,
+async fn post_logout<H: AuthHost>(
+    State(host): State<H>,
     client: Client,
     Json(req): Json<LogoutRequest>,
 ) -> AuthApiResult<Response> {
-    let config = state.config();
-    if client.session(&state, &config).is_none() && !client.ingress {
+    let config = host.auth_config();
+    let auth = host.auth();
+    if client.session(&auth, &config).is_none() && !client.ingress {
         return Err(AuthError::NotAuthenticated.into());
     }
 
-    let auth = state.auth();
     if req.all {
         auth.revoke_all()?;
         log::info!("All admin sessions ended from {}", client.ip);
@@ -343,44 +331,78 @@ async fn post_logout(
         .into_response())
 }
 
-async fn post_password(
-    State(state): State<AppState>,
+async fn post_password<H: AuthHost>(
+    State(host): State<H>,
     client: Client,
     Json(req): Json<PasswordChange>,
 ) -> AuthApiResult<Response> {
-    let config = state.config();
-    if client.session(&state, &config).is_none() && !client.ingress {
+    let config = host.auth_config();
+    let auth = host.auth();
+    if client.session(&auth, &config).is_none() && !client.ingress {
         return Err(AuthError::NotAuthenticated.into());
     }
 
     // required under Ingress too: a spoofed Ingress peer must not be able
     // to replace the password
-    check_password(&state, &config, &client, req.current_password).await?;
-    let hash = hash_new_password(&state, req.new_password).await?;
-    state.store().update_auth(|config| {
-        config.password_hash = Some(hash);
-        true
-    })?;
+    check_password(&host, &config, &client, req.current_password).await?;
+    let hash = hash_new_password(&host, req.new_password).await?;
+    host.set_password_hash(hash, false)?;
 
-    let auth = state.auth();
     auth.revoke_all()?;
     log::info!("Admin password changed from {}", client.ip);
 
-    let config = state.config();
+    let config = host.auth_config();
     if client.ingress {
         return Ok(Json(session_response(&config, &client, None)).into_response());
     }
-    let session = auth.create_session(client.ip, Expiry::from_config(&config.bifrost.auth))?;
+    let session = auth.create_session(client.ip, Expiry::from_config(&config))?;
     Ok(new_session_reply(&config, &client, session))
 }
 
-pub fn router() -> Router<AppState> {
+/// Where the authentication routes find the session store and the password:
+/// the running bridge, or setup mode before any configuration exists.
+pub trait AuthHost: Clone + Send + Sync + 'static {
+    fn auth(&self) -> Arc<Auth>;
+
+    fn auth_config(&self) -> AuthConfig;
+
+    /// Store a new password hash. With `only_first`, only when no password
+    /// is set yet. Returns whether it was stored.
+    fn set_password_hash(&self, hash: String, only_first: bool) -> Result<bool, ConfigStoreError>;
+}
+
+impl AuthHost for AppState {
+    fn auth(&self) -> Arc<Auth> {
+        Self::auth(self)
+    }
+
+    fn auth_config(&self) -> AuthConfig {
+        self.config().bifrost.auth.clone()
+    }
+
+    fn set_password_hash(&self, hash: String, only_first: bool) -> Result<bool, ConfigStoreError> {
+        self.store().update_auth(|config| {
+            if only_first && config.password_hash.is_some() {
+                return false;
+            }
+            config.password_hash = Some(hash);
+            true
+        })
+    }
+}
+
+/// The routes setup mode serves too: no password change before there is a
+/// password.
+pub fn session_router<H: AuthHost>() -> Router<H> {
     Router::new()
-        .route("/session", get(get_session))
-        .route("/setup", post(post_setup))
-        .route("/login", post(post_login))
-        .route("/logout", post(post_logout))
-        .route("/password", post(post_password))
+        .route("/session", get(get_session::<H>))
+        .route("/setup", post(post_setup::<H>))
+        .route("/login", post(post_login::<H>))
+        .route("/logout", post(post_logout::<H>))
+}
+
+pub fn router() -> Router<AppState> {
+    session_router().route("/password", post(post_password::<AppState>))
 }
 
 #[cfg(test)]

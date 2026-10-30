@@ -164,3 +164,15 @@ pub struct ErrorResponse {
     /// Validation findings, when the request was refused because of them.
     pub errors: Vec<ValidationError>,
 }
+
+/// Why Bifrost is in setup mode, from `GET /bifrost/setup/status`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SetupStatus {
+    /// The configuration file Bifrost tried to read.
+    pub config_file: String,
+    /// Why it could not be used: missing, or the parser's message.
+    pub reason: String,
+    /// A backup of the last applied configuration exists, and
+    /// `POST /bifrost/setup/restore` can load it into the draft.
+    pub backup_available: bool,
+}

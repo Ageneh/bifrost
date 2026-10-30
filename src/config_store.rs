@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use crate::config::diff::{self, ApplyPlan, ConfigChange};
 use crate::config::validate::{self, ValidationError};
-use crate::config::{self, AppConfig, AuthConfig};
+use crate::config::{self, AppConfig, AuthConfig, BifrostConfig};
 
 /// Permissions for every file the store creates. Configuration may hold
 /// secrets, so it is readable by the owner only.
@@ -75,12 +75,23 @@ impl ConfigPaths {
     /// working directory, exactly as before.
     #[must_use]
     pub fn resolve(config_file: &Utf8Path, config: &AppConfig) -> Self {
+        Self::resolve_with(config_file, &config.bifrost)
+    }
+
+    /// Paths for `config_file` with the default `bifrost` settings, for
+    /// setup mode, where no configuration can be read.
+    #[must_use]
+    pub fn with_defaults(config_file: &Utf8Path) -> Self {
+        Self::resolve_with(config_file, &BifrostConfig::default())
+    }
+
+    fn resolve_with(config_file: &Utf8Path, bifrost: &BifrostConfig) -> Self {
         let dir = config_file.parent().unwrap_or_else(|| Utf8Path::new(""));
         let file_name = config_file.file_name().unwrap_or(DEFAULT_CONFIG_FILE_NAME);
         let stem = config_file.file_stem().unwrap_or("config");
         let extension = config_file.extension().unwrap_or(DEFAULT_EXTENSION);
 
-        let state = dir.join(&config.bifrost.state_file);
+        let state = dir.join(&bifrost.state_file);
         let sessions = state
             .parent()
             .unwrap_or_else(|| Utf8Path::new(""))
@@ -91,7 +102,7 @@ impl ConfigPaths {
             draft: dir.join(format!("{stem}.draft.{extension}")),
             backup: dir.join(format!("{file_name}.bak")),
             state,
-            cert: dir.join(&config.bifrost.cert_file),
+            cert: dir.join(&bifrost.cert_file),
             sessions,
         }
     }
