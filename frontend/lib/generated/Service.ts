@@ -5,4 +5,8 @@ export type Service = { id: string,
 /**
  * `name@instance`, as the service manager prints it.
  */
-name: string, state: ServiceState, };
+name: string, state: ServiceState, 
+/**
+ * Why the service last failed, `null` when it has run since.
+ */
+last_error: string | null, };
