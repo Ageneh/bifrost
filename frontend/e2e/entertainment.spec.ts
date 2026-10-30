@@ -1,15 +1,17 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * Wave 8's entertainment recipes and diagnostics, behind the ingress prefix
- * at 390 px.
+ * Wave 8's entertainment editor, behind the ingress prefix at 390 px.
  *
- * The wizard's entertainment step is in wizard.spec.ts; the canvas and the
- * channel table arrive with their own commit.
+ * The recipes, the wizard's entertainment step (in wizard.spec.ts), the
+ * canvas with its numeric inputs, the derived channel table, the diagnostics
+ * panel, and the overlap refusal that keeps a light in one zone.
  */
 const ZONE_TV = '2f1c4f1e-0000-4000-8000-000000000001'
 const ZONE_DESK = '2f1c4f1e-0000-4000-8000-000000000002'
 const TV_LEFT = '2f1c4f1e-0000-4000-8000-0000000000a1'
+const TV_RIGHT = '2f1c4f1e-0000-4000-8000-0000000000a2'
+const DESK_LIGHT = '2f1c4f1e-0000-4000-8000-0000000000a3'
 const STUDIO_LIGHT = '2f1c4f1e-0000-4000-8000-0000000000a4'
 
 test.beforeEach(async ({ request }) => {
@@ -48,11 +50,9 @@ test.describe('entertainment', () => {
     await page.getByTestId(`entertainment-wizard-pick-${STUDIO_LIGHT}`).check()
     await page.getByTestId('entertainment-wizard-create').click()
 
-    // the recipe hands over to the zone it made
-    await expect(page).toHaveURL(/#\/entertainment\/[0-9a-f-]+$/)
-
-    await page.goto('#/entertainment')
-    await expect(page.getByTestId('entertainment-zones')).toContainText('Study')
+    await expect(page.getByTestId('zone-editor')).toBeVisible()
+    await expect(page.getByTestId('zone-name')).toHaveText('Study')
+    await expect(page.getByTestId('channel-table')).toBeVisible()
   })
 
   test('a light already in a zone is refused, and both names are given', async ({ page }) => {
@@ -68,6 +68,40 @@ test.describe('entertainment', () => {
     await expect(page.getByTestId('entertainment-wizard-create')).toBeDisabled()
   })
 
+  test('the canvas edits numbers and the channel table follows the save', async ({ page }) => {
+    // positions are edited at a desk width; 390 px is the read-only case
+    await page.setViewportSize({ width: 1200, height: 900 })
+    await page.goto(`#/entertainment/${ZONE_TV}`)
+
+    await expect(page.getByTestId('zone-canvas')).toHaveAttribute('data-state', 'editable')
+    await expect(page.getByTestId('channel-table')).toBeVisible()
+    await expect(page.getByTestId('zone-save')).toBeDisabled()
+
+    // the saved position is the one the zone holds
+    await expect(page.getByTestId(`position-${TV_LEFT}-0-x`)).toHaveValue('-0.4')
+
+    await page.getByTestId(`position-${TV_LEFT}-0-x`).fill('-0.2')
+    await page.getByTestId(`position-${TV_LEFT}-0-x`).blur()
+    await expect(page.getByTestId('zone-save')).toBeEnabled()
+
+    await page.getByTestId('zone-save').click()
+    await expect(page.getByTestId('toast-ok').first()).toContainText('Zone saved.')
+
+    // the channel the server derived from the saved position
+    await expect(page.getByTestId('channel-row-0')).toContainText('-0.2')
+  })
+
+  test('an offline light keeps its position and is drawn hollow', async ({ page }) => {
+    await page.goto(`#/entertainment/${ZONE_DESK}`)
+
+    await expect(page.getByTestId('zone-editor')).toBeVisible()
+    await expect(page.getByTestId(`position-dot-${DESK_LIGHT}-0`)).toHaveAttribute(
+      'data-state',
+      'offline',
+    )
+    await expect(page.getByTestId(`position-${DESK_LIGHT}-0-x`)).toBeVisible()
+  })
+
   test('the diagnostics panel says why a stream ended', async ({ page }) => {
     await page.goto('#/entertainment')
 
@@ -81,5 +115,28 @@ test.describe('entertainment', () => {
     await page.getByTestId(`entertainment-streams-stop-${ZONE_TV}`).click()
     await expect(page.getByTestId(`diagnostics-row-${ZONE_TV}`)).toHaveCount(0)
     await expect(page.getByTestId(`diagnostics-row-${ZONE_DESK}`)).toBeVisible()
+  })
+
+  test('the canvas is read-only at 390 px', async ({ page }) => {
+    await page.goto(`#/entertainment/${ZONE_TV}`)
+
+    await expect(page.getByTestId('zone-canvas')).toHaveAttribute('data-state', 'read-only')
+    await expect(page.getByTestId(`position-${TV_LEFT}-0-x`)).toBeDisabled()
+    await expect(page.getByTestId('zone-save')).toBeDisabled()
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )
+    expect(overflow).toBe(false)
+  })
+
+  test('the editor identifies a device by its light', async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 })
+    await page.goto(`#/entertainment/${ZONE_TV}`)
+
+    const identify = page.getByTestId(`zone-identify-${TV_RIGHT}`)
+    await expect(identify).toBeVisible()
+    await identify.click()
+    await expect(page.getByTestId('toast-ok').first()).toContainText('flashing')
   })
 })
