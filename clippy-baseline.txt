@@ -1,0 +1,7 @@
+# G3 baseline: distinct clippy warnings (message and location) from
+#   cargo clippy --all-targets --workspace --locked
+# measured on master 12d9e37. scripts/clippy-gate.sh fails when the count
+# rises or clippy reports an error. A wave may lower this number, never raise
+# it. Lint sets change between releases, so compare on the toolchain below.
+toolchain=1.99.1
+warnings=178
