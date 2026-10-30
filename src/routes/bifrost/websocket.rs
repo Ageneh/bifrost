@@ -73,6 +73,7 @@ impl WebSocketTask {
             id: service_event.id(),
             name,
             state: service_event.state(),
+            last_error: service_event.error().map(ToString::to_string),
         };
 
         Ok(Some(Update::ServiceUpdate(service)))

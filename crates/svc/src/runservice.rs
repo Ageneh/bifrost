@@ -37,6 +37,14 @@ impl State {
         Ok(self.tx.send(ServiceEvent::new(self.id, self.state))?)
     }
 
+    /// Fail the service, carrying the reason so the services table can show
+    /// what went wrong instead of only that it did.
+    pub fn fail(&mut self, error: impl Into<String>) -> Result<(), RunSvcError> {
+        self.state = ServiceState::Failed;
+        self.retry = 0;
+        Ok(self.tx.send(ServiceEvent::failed(self.id, error))?)
+    }
+
     pub const fn get(&self) -> ServiceState {
         self.state
     }
@@ -193,7 +201,7 @@ impl<S: Service> ServiceRunner for StandardService<S> {
                                             );
                                         }
                                     }
-                                    state.set(ServiceState::Failed)?;
+                                    state.fail(err.to_string())?;
                                 }
                             }
                         },

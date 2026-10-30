@@ -47,6 +47,7 @@ const METHODS: &[Method] = &[
 const KNOWN_ROUTES: &[&str] = &[
     "/bifrost/service",
     "/bifrost/service/{id}",
+    "/bifrost/service/{id}/restart",
     "/bifrost/bridge/certificate",
     "/bifrost/bridge/certificate/regenerate",
     "/bifrost/z2m",
