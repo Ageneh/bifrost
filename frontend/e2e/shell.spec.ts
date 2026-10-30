@@ -78,5 +78,4 @@ test.describe('the console shell at 390 px', () => {
     const direction = await nav.evaluate(element => getComputedStyle(element).flexDirection)
     expect(direction).toBe('row')
   })
-
 })
