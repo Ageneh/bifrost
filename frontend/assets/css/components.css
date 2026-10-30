@@ -735,3 +735,10 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* long unbroken tokens — a certificate fingerprint, a bridge id — must wrap
+   inside their column instead of pushing the page sideways */
+.fd-break {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

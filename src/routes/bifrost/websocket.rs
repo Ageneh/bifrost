@@ -116,6 +116,9 @@ impl WebSocketTask {
         let inventory = self.state.inventory();
         let mut inventory_events = inventory.subscribe();
 
+        let link_button = self.state.link_button();
+        let mut link_button_events = link_button.subscribe();
+
         let app_config = redacted_app_config(&self.state.config())?;
         self.send(Update::AppConfig(app_config)).await?;
 
@@ -127,6 +130,8 @@ impl WebSocketTask {
         )))
         .await?;
 
+        self.send(Update::LinkButton(link_button.status())).await?;
+
         loop {
             let reply = select! {
                 Some(msg) = self.ws.recv() => self.handle_websocket_message(&msg?),
@@ -135,6 +140,7 @@ impl WebSocketTask {
                 log_event = log_events.recv() => Ok(log_event.ok().map(Update::Log)),
                 hue_event = hue_events.recv() => self.handle_hue_event(hue_event?),
                 inventory_event = inventory_events.recv() => self.handle_inventory_event(inventory_event),
+                link_button_event = link_button_events.recv() => Ok(link_button_event.ok().map(Update::LinkButton)),
             };
 
             if let Some(reply) = reply? {

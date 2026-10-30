@@ -13,15 +13,22 @@ use std::path::PathBuf;
 use bifrost_api::admin::auth::{
     LoginRequest, LogoutRequest, PasswordChange, SessionResponse, SetupRequest,
 };
+use bifrost_api::admin::pairing::{
+    IdentityBundle, IdentityMacChange, IdentityMacChangeReply, IdentityPairingEntry,
+    IdentityRestore, IdentityRestoreReply, LinkButtonPress, LinkButtonStatus, PairingHistory,
+    PairingMode, PairingRecord,
+};
 use bifrost_api::admin::{
-    ApplyAction, ApplyFailure, ApplyPlan, ApplyResponse, ConfigChange, ConfigImport,
-    DiscoveredDevice, DiscoveredRoom, DiscoveryRequest, DiscoveryResult, DraftPatch, DraftResponse,
-    DraftWrite, ErrorResponse, Reason, RestartRequest, RevisionRequest, RevisionResponse,
-    RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest, SetupStatus, Severity,
-    ValidationError, WizardProgress, WizardWrite,
+    ApplyAction, ApplyFailure, ApplyPlan, ApplyResponse, CertificateInfo, ConfigChange,
+    ConfigImport, DiscoveredDevice, DiscoveredRoom, DiscoveryRequest, DiscoveryResult, DraftPatch,
+    DraftResponse, DraftWrite, ErrorResponse, Reason, RestartRequest, RevisionRequest,
+    RevisionResponse, RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest, SetupStatus,
+    Severity, StateCounts, StateResetRequest, StateSummary, ValidationError, WizardProgress,
+    WizardWrite,
 };
 use bifrost_api::config::{
-    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, RoomConfig, Z2mServer,
+    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, PairingConfig, RoomConfig,
+    Z2mServer,
 };
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
@@ -62,6 +69,7 @@ fn export_typescript_bindings() {
     BifrostConfig::export_all(&cfg).unwrap();
     BridgeConfig::export_all(&cfg).unwrap();
     RoomConfig::export_all(&cfg).unwrap();
+    PairingConfig::export_all(&cfg).unwrap();
     DeviceConfig::export_all(&cfg).unwrap();
     Z2mServer::export_all(&cfg).unwrap();
 
@@ -98,6 +106,11 @@ fn export_typescript_bindings() {
     ErrorResponse::export_all(&cfg).unwrap();
     SetupStatus::export_all(&cfg).unwrap();
 
+    CertificateInfo::export_all(&cfg).unwrap();
+    StateSummary::export_all(&cfg).unwrap();
+    StateCounts::export_all(&cfg).unwrap();
+    StateResetRequest::export_all(&cfg).unwrap();
+
     Availability::export_all(&cfg).unwrap();
     Capabilities::export_all(&cfg).unwrap();
     DeviceInfo::export_all(&cfg).unwrap();
@@ -113,6 +126,18 @@ fn export_typescript_bindings() {
     ResourceRef::export_all(&cfg).unwrap();
     RoomRef::export_all(&cfg).unwrap();
     ServerInfo::export_all(&cfg).unwrap();
+
+    LinkButtonStatus::export_all(&cfg).unwrap();
+    LinkButtonPress::export_all(&cfg).unwrap();
+    PairingMode::export_all(&cfg).unwrap();
+    PairingRecord::export_all(&cfg).unwrap();
+    PairingHistory::export_all(&cfg).unwrap();
+    IdentityPairingEntry::export_all(&cfg).unwrap();
+    IdentityBundle::export_all(&cfg).unwrap();
+    IdentityMacChange::export_all(&cfg).unwrap();
+    IdentityMacChangeReply::export_all(&cfg).unwrap();
+    IdentityRestore::export_all(&cfg).unwrap();
+    IdentityRestoreReply::export_all(&cfg).unwrap();
 
     SessionResponse::export_all(&cfg).unwrap();
     LoginRequest::export_all(&cfg).unwrap();

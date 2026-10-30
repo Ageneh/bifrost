@@ -7,13 +7,22 @@
  * travels on its own.
  */
 import type { ApplyResponse } from './generated/ApplyResponse'
+import type { CertificateInfo } from './generated/CertificateInfo'
 import type { ConfigChange } from './generated/ConfigChange'
 import type { ConfigImport } from './generated/ConfigImport'
 import type { DeviceInfo } from './generated/DeviceInfo'
 import type { DraftPatch } from './generated/DraftPatch'
 import type { DraftResponse } from './generated/DraftResponse'
 import type { DraftWrite } from './generated/DraftWrite'
+import type { IdentityBundle } from './generated/IdentityBundle'
+import type { IdentityMacChange } from './generated/IdentityMacChange'
+import type { IdentityMacChangeReply } from './generated/IdentityMacChangeReply'
+import type { IdentityRestore } from './generated/IdentityRestore'
+import type { IdentityRestoreReply } from './generated/IdentityRestoreReply'
 import type { InventorySnapshot } from './generated/InventorySnapshot'
+import type { LinkButtonStatus } from './generated/LinkButtonStatus'
+import type { PairingHistory } from './generated/PairingHistory'
+import type { StateSummary } from './generated/StateSummary'
 import type { LoginRequest } from './generated/LoginRequest'
 import type { LogoutRequest } from './generated/LogoutRequest'
 import type { PasswordChange } from './generated/PasswordChange'
@@ -284,6 +293,74 @@ export class ApiClient {
       `rooms/${encodeURIComponent(room)}/scenes/${encodeURIComponent(scene)}/recall`,
       { method: 'POST', body: { duration: duration ?? null }, csrf: true },
     )
+  }
+
+  // ---- pairing ---------------------------------------------------------
+
+  /** The pairing window as it stands right now. */
+  linkButton(): Promise<LinkButtonStatus> {
+    return this.request('bridge/link-button')
+  }
+
+  /** Open a pairing window; the server defaults to 30 seconds. */
+  pressLinkButton(seconds?: number): Promise<LinkButtonStatus> {
+    return this.request('bridge/link-button', {
+      method: 'POST',
+      body: seconds === undefined ? {} : { seconds },
+      csrf: true,
+    })
+  }
+
+  /** The pairing mode and the attempts the bridge remembers. */
+  pairing(): Promise<PairingHistory> {
+    return this.request('bridge/pairing')
+  }
+
+  // ---- identity --------------------------------------------------------
+
+  /** What the bridge's own certificate says. */
+  certificate(): Promise<CertificateInfo> {
+    return this.request('bridge/certificate')
+  }
+
+  /** Replace the certificate. Every paired client must pair again. */
+  regenerateCertificate(): Promise<CertificateInfo> {
+    return this.request('bridge/certificate/regenerate', { method: 'POST', body: {}, csrf: true })
+  }
+
+  /** Queue a MAC change; it takes effect at the next start. */
+  changeMac(body: IdentityMacChange): Promise<IdentityMacChangeReply> {
+    return this.request('bridge/identity/mac', { method: 'POST', body, csrf: true })
+  }
+
+  /**
+   * The identity bundle: certificate and pairing list.
+   *
+   * The server only serves it over HTTPS, so this call fails on the plain
+   * listener with the server's own message.
+   */
+  identityBackup(): Promise<IdentityBundle> {
+    return this.request('bridge/identity/backup')
+  }
+
+  /** Restore an identity bundle, authorised by the admin password. */
+  restoreIdentity(body: IdentityRestore): Promise<IdentityRestoreReply> {
+    return this.request('bridge/identity/restore', { method: 'POST', body, csrf: true })
+  }
+
+  /** What the bridge's state holds, and which bridge this is. */
+  stateSummary(): Promise<StateSummary> {
+    return this.request('state/summary')
+  }
+
+  /** The state as YAML, for the backup the reset offers. */
+  stateExport(): Promise<string> {
+    return this.request('state/export', { text: true })
+  }
+
+  /** Empty the state, after the user typed the bridge id. */
+  resetState(confirm: string): Promise<StateSummary> {
+    return this.request('state/reset', { method: 'POST', body: { confirm }, csrf: true })
   }
 
   // ---- services --------------------------------------------------------

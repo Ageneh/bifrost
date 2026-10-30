@@ -2,6 +2,7 @@
 import type { BifrostConfig } from "./BifrostConfig";
 import type { BridgeConfig } from "./BridgeConfig";
 import type { DeviceConfig } from "./DeviceConfig";
+import type { PairingConfig } from "./PairingConfig";
 import type { RoomConfig } from "./RoomConfig";
 import type { Z2mServer } from "./Z2mServer";
 
@@ -9,7 +10,7 @@ export type AppConfig = { bridge: BridgeConfig,
 /**
  * Keyed by server name, which is how the file spells it.
  */
-z2m: { [key in string]: Z2mServer }, bifrost: BifrostConfig, rooms: { [key in string]: RoomConfig }, 
+z2m: { [key in string]: Z2mServer }, bifrost: BifrostConfig, pairing: PairingConfig, rooms: { [key in string]: RoomConfig }, 
 /**
  * Keyed by IEEE address, as z2m prints it.
  */

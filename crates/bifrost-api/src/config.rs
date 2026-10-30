@@ -123,6 +123,22 @@ impl Default for BifrostConfig {
     }
 }
 
+/// Pairing settings.
+///
+/// A real bridge pairs only while its link button is pressed. Bifrost has no
+/// button, so the admin screen stands in for one; `require_link_button`
+/// decides whether `POST /api` honours the window. The default is off, so an
+/// existing install keeps pairing exactly the way it always has.
+#[derive(Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PairingConfig {
+    #[serde(default)]
+    pub require_link_button: bool,
+    #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub unknown: UnknownSettings,
+}
+
 /// An IP network, written `10.0.0.0/8`; a bare address is a single host.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct IpCidr {
@@ -357,6 +373,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub bifrost: BifrostConfig,
     #[serde(default)]
+    pub pairing: PairingConfig,
+    #[serde(default)]
     pub rooms: BTreeMap<String, RoomConfig>,
     /// Keyed by IEEE address, as z2m prints it.
     #[serde(default)]
@@ -395,6 +413,7 @@ impl Debug for AppConfig {
             .field("bridge", &self.bridge)
             .field("z2m", &self.z2m)
             .field("bifrost", &self.bifrost)
+            .field("pairing", &self.pairing)
             .field("rooms", &self.rooms)
             .field("devices", &self.devices)
             .field("unknown", &SettingNames(&self.unknown))
@@ -425,6 +444,15 @@ impl Debug for BifrostConfig {
             .field("state_file", &self.state_file)
             .field("cert_file", &self.cert_file)
             .field("auth", &self.auth)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for PairingConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PairingConfig")
+            .field("require_link_button", &self.require_link_button)
             .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }

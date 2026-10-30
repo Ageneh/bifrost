@@ -11,6 +11,7 @@ use crate::error::BifrostResult;
 
 /// What the bridge's state holds, and what it is.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct StateSummary {
     /// The bridge id, derived from the MAC address.
     pub bridge_id: String,
@@ -26,6 +27,7 @@ pub struct StateSummary {
 
 /// How many of each resource the state holds.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct StateCounts {
     pub lights: usize,
     pub grouped_lights: usize,
@@ -38,6 +40,7 @@ pub struct StateCounts {
 /// Reset the state. The typed bridge id is the confirmation: a request that
 /// does not carry it is refused, so a stray click cannot empty the bridge.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct StateResetRequest {
     /// The bridge id from [`StateSummary`], typed by the user.
     pub confirm: String,

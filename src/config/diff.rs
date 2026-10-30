@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 pub use bifrost_api::admin::{ApplyAction, ApplyPlan, ConfigChange, Reason};
 
 use crate::config::redact::redacted;
-use crate::config::{AppConfig, BifrostConfig, BridgeConfig};
+use crate::config::{AppConfig, BifrostConfig, BridgeConfig, PairingConfig};
 
 pub const HTTP_SERVICE: &str = "http";
 pub const HTTPS_SERVICE: &str = "https";
@@ -153,12 +153,24 @@ fn bifrost_effect(field: &str) -> Effect {
     .unwrap_or(UNREAD)
 }
 
+fn pairing_effect(field: &str) -> Effect {
+    field_effects!(PairingConfig {
+        // read on every `POST /api`, so the new value applies at once
+        require_link_button => Effect::Live,
+        unknown => UNREAD,
+    })
+    .into_iter()
+    .find_map(|(name, effect)| (name == field).then_some(effect))
+    .unwrap_or(UNREAD)
+}
+
 fn classify(change: &Change, servers: &[String]) -> Effect {
     // every top-level section has an arm below
     let _ = field_effects!(AppConfig {
         bridge => (),
         z2m => (),
         bifrost => (),
+        pairing => (),
         rooms => (),
         devices => (),
         unknown => (),
@@ -171,6 +183,8 @@ fn classify(change: &Change, servers: &[String]) -> Effect {
         ["bridge", field, ..] => bridge_effect(field),
         ["bifrost"] => Effect::Restart("the bifrost section is only read at startup"),
         ["bifrost", field, ..] => bifrost_effect(field),
+        ["pairing"] => Effect::Live,
+        ["pairing", field, ..] => pairing_effect(field),
         ["z2m", name] => {
             let name = (*name).to_string();
             Effect::Actions(vec![if change.before.is_null() {
