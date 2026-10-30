@@ -10,12 +10,15 @@
 import { computed, ref } from 'vue'
 import CapabilityBadges from '~/components/CapabilityBadges.vue'
 import WhyChain from '~/components/WhyChain.vue'
-import type { DeviceInfo, ServerInfo } from '~/lib/generated'
+import { LOW_BATTERY, useInventory } from '~/composables/useInventory'
+import type { DeviceEvent, DeviceInfo, ServerInfo } from '~/lib/generated'
 
 const props = defineProps<{
   device: DeviceInfo
   server?: ServerInfo
 }>()
+
+const inventory = useInventory()
 
 const emit = defineEmits<{
   identify: [device: DeviceInfo]
@@ -24,6 +27,52 @@ const emit = defineEmits<{
 
 const identifying = ref(false)
 const identified = ref(false)
+
+/** What this device reported while the page was open, newest first. */
+const events = computed<DeviceEvent[]>(() => inventory.eventsFor(props.device.ieee).slice(0, 12))
+
+/** A remote's last press, as the chip the row also shows. */
+const lastAction = computed(() => inventory.lastAction(props.device))
+
+/** The battery level, when the device reports one. */
+const battery = computed(() => props.device.battery)
+
+const batteryLow = computed(
+  () => battery.value !== null && battery.value < LOW_BATTERY,
+)
+
+/** An event's value as one line of text. */
+function describe(event: DeviceEvent): string {
+  const value = event.value
+  if (typeof value === 'boolean') {
+    if (event.kind === 'contact') {
+      return value ? 'open' : 'closed'
+    }
+    if (event.kind === 'occupancy') {
+      return value ? 'motion' : 'clear'
+    }
+    return value ? 'yes' : 'no'
+  }
+  if (typeof value === 'number') {
+    if (event.kind === 'temperature') {
+      return `${value.toFixed(1)} °C`
+    }
+    if (event.kind === 'illuminance') {
+      return `${Math.round(value)} lx`
+    }
+    return String(value)
+  }
+  return String(value)
+}
+
+/** An event's time, as the clock a person reads. */
+function clock(at: string): string {
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) {
+    return at
+  }
+  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 const availability = computed(() => {
   if (props.device.availability === 'online') {
@@ -94,6 +143,31 @@ async function identify(): Promise<void> {
         >{{ device.supported ? 'mapped' : 'not mapped' }}</span>
       </div>
 
+      <div
+        v-if="device.device_type === 'remote'"
+        class="fd-cluster"
+        data-testid="device-last-action"
+      >
+        <span class="fd-label">Last press</span>
+        <span
+          class="fd-chip"
+          data-testid="device-action-chip"
+        >{{ lastAction ?? 'none yet' }}</span>
+      </div>
+
+      <div
+        v-if="battery !== null"
+        class="fd-cluster"
+        data-testid="device-battery"
+        :data-low="batteryLow ? 'true' : 'false'"
+      >
+        <span class="fd-label">Battery</span>
+        <span
+          class="fd-status"
+          :class="batteryLow ? 'fd-status--warn' : 'fd-status--ok'"
+        >{{ battery }} %</span>
+      </div>
+
       <p
         v-if="device.unsupported_reason"
         class="fd-meta fd-muted"
@@ -129,6 +203,34 @@ async function identify(): Promise<void> {
         <div class="fd-value fd-num">
           {{ device.ieee }}
         </div>
+      </div>
+
+      <div>
+        <div class="fd-label">
+          Recent events
+        </div>
+        <ul
+          v-if="events.length > 0"
+          class="events"
+          data-testid="device-events"
+        >
+          <li
+            v-for="(event, index) in events"
+            :key="`${event.at}-${index}`"
+            class="fd-meta"
+          >
+            <span class="fd-num fd-muted">{{ clock(event.at) }}</span>
+            <span> · {{ event.kind }}</span>
+            <span class="fd-num"> · {{ describe(event) }}</span>
+          </li>
+        </ul>
+        <p
+          v-else
+          class="fd-meta fd-muted"
+          data-testid="device-events-empty"
+        >
+          Nothing reported since this page opened.
+        </p>
       </div>
 
       <div>
@@ -178,5 +280,16 @@ async function identify(): Promise<void> {
 }
 .exposes li {
   padding: 1px 0;
+}
+.events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+}
+.events li {
+  padding: 1px 0;
+  font-variant-numeric: tabular-nums;
 }
 </style>

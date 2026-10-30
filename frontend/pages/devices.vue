@@ -17,9 +17,9 @@ import CapabilityBadges from '~/components/CapabilityBadges.vue'
 import DeviceDetail from '~/components/DeviceDetail.vue'
 import DeviceFilterBar from '~/components/DeviceFilterBar.vue'
 import { useToast } from '~/composables/useToast'
-import { DEVICE_TYPES, useInventory } from '~/composables/useInventory'
+import { DEVICE_TABS, LOW_BATTERY, useInventory } from '~/composables/useInventory'
 import { useStatusPanel } from '~/composables/useStatusPanel'
-import type { DeviceInfo, DeviceType } from '~/lib/generated'
+import type { DeviceInfo } from '~/lib/generated'
 
 const {
   devices,
@@ -29,13 +29,15 @@ const {
   counts,
   serverInfo,
   refresh,
+  readingOf,
+  lastAction,
   identify: identifyDevice,
   permitJoin: openJoinWindow,
 } = useInventory()
 const statusPanel = useStatusPanel()
 const toast = useToast()
 
-const type = ref<DeviceType | 'all'>('all')
+const type = ref<string>('all')
 const search = ref('')
 const server = ref('')
 const supported = ref<'all' | 'yes' | 'no'>('all')
@@ -47,19 +49,106 @@ const joinServer = ref('')
 
 const columns: TableColumn[] = [
   { key: 'friendly_name', label: 'Device' },
+  { key: 'readout', label: 'Reading' },
   { key: 'device_type', label: 'Type' },
   { key: 'model', label: 'Model' },
-  { key: 'capabilities', label: 'Capabilities' },
   { key: 'availability', label: 'Reach' },
   { key: 'mapping', label: 'Hue' },
 ]
+
+/** The readout a row was built with. */
+function rowReadout(row: Record<string, unknown>): { text: string, age: string, warn: string } {
+  return row.readout as { text: string, age: string, warn: string }
+}
+
+/** How long ago a reading arrived, in words a person reads at a glance. */
+function ago(at: string | null | undefined): string {
+  if (at === null || at === undefined) {
+    return ''
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 1000))
+  if (seconds < 60) {
+    return `${seconds} s`
+  }
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} min`
+  }
+  if (seconds < 86400) {
+    return `${Math.round(seconds / 3600)} h`
+  }
+  return `${Math.round(seconds / 86400)} d`
+}
+
+/**
+ * The one thing a sensor row says about itself.
+ *
+ * A sensor has one reading a person cares about at a glance — is there
+ * motion, how warm is it, is the door open — and the age of it, because a
+ * reading from an hour ago is not the same as one from a second ago.
+ */
+function readout(device: DeviceInfo): { text: string, age: string, warn: string } {
+  const batteryWarn = device.battery !== null && device.battery < LOW_BATTERY
+    ? `battery ${device.battery} %`
+    : ''
+
+  switch (device.device_type) {
+    case 'motion': {
+      const reading = readingOf(device, 'occupancy')
+      if (reading === undefined) {
+        return { text: 'no reading yet', age: '', warn: batteryWarn }
+      }
+      return {
+        text: reading.value === true ? 'motion' : 'clear',
+        age: ago(reading.at),
+        warn: batteryWarn,
+      }
+    }
+    case 'temperature': {
+      const reading = readingOf(device, 'temperature')
+      if (reading === undefined) {
+        return { text: 'no reading yet', age: '', warn: batteryWarn }
+      }
+      return { text: `${Number(reading.value).toFixed(1)} °C`, age: ago(reading.at), warn: batteryWarn }
+    }
+    case 'illuminance': {
+      const reading = readingOf(device, 'illuminance')
+      if (reading === undefined) {
+        return { text: 'no reading yet', age: '', warn: batteryWarn }
+      }
+      return { text: `${Math.round(Number(reading.value))} lx`, age: ago(reading.at), warn: batteryWarn }
+    }
+    case 'contact': {
+      const reading = readingOf(device, 'contact')
+      if (reading === undefined) {
+        return { text: 'no reading yet', age: '', warn: batteryWarn }
+      }
+      return {
+        text: reading.value === true ? 'open' : 'closed',
+        age: ago(reading.at),
+        warn: batteryWarn,
+      }
+    }
+    case 'remote': {
+      const action = lastAction(device)
+      return { text: action ?? 'no press yet', age: '', warn: batteryWarn }
+    }
+    default:
+      return { text: '', age: '', warn: batteryWarn }
+  }
+}
 
 /** The devices the tabs, the filters and the search leave. */
 const rows = computed(() => {
   const needle = search.value.trim().toLowerCase()
 
   return devices.value
-    .filter(device => type.value === 'all' || device.device_type === type.value)
+    .filter((device) => {
+      if (type.value === 'all') {
+        return true
+      }
+      const tab = DEVICE_TABS.find(entry => entry.key === type.value)
+      return tab !== undefined && tab.types.includes(device.device_type)
+    })
     .filter(device => server.value === '' || device.server === server.value)
     .filter(device => supported.value === 'all'
       || (supported.value === 'yes') === device.supported)
@@ -70,7 +159,7 @@ const rows = computed(() => {
       return [device.friendly_name, device.model, device.vendor, device.ieee]
         .some(value => (value ?? '').toLowerCase().includes(needle))
     })
-    .map(device => ({ ...device } as Record<string, unknown>))
+    .map(device => ({ ...device, readout: readout(device) } as Record<string, unknown>))
 })
 
 const total = computed(() => devices.value.length)
@@ -236,7 +325,7 @@ onBeforeUnmount(() => {
               All <span class="fd-meta fd-muted">{{ total }}</span>
             </button>
             <button
-              v-for="entry in DEVICE_TYPES"
+              v-for="entry in DEVICE_TABS"
               :key="entry.key"
               class="fd-btn fd-btn--ghost fd-btn--sm"
               type="button"
@@ -277,6 +366,29 @@ onBeforeUnmount(() => {
               <div class="fd-meta fd-muted">
                 {{ (row as Record<string, unknown>).server }}
               </div>
+            </template>
+
+            <template #cell-readout="{ row }">
+              <span
+                v-if="rowReadout(row).text !== ''"
+                class="readout"
+                data-testid="device-readout"
+              >
+                <span class="readout__value">{{ rowReadout(row).text }}</span>
+                <span
+                  v-if="rowReadout(row).age !== ''"
+                  class="fd-meta fd-muted"
+                >· {{ rowReadout(row).age }}</span>
+                <span
+                  v-if="rowReadout(row).warn !== ''"
+                  class="readout__warn"
+                  data-testid="device-battery-warn"
+                >{{ rowReadout(row).warn }}</span>
+              </span>
+              <span
+                v-else
+                class="fd-meta fd-muted"
+              >—</span>
             </template>
 
             <template #cell-device_type="{ row }">
@@ -364,5 +476,18 @@ onBeforeUnmount(() => {
 }
 .link--warn {
   color: var(--fd-warn);
+}
+.readout {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--fd-1);
+  flex-wrap: wrap;
+}
+.readout__value {
+  font-variant-numeric: tabular-nums;
+}
+.readout__warn {
+  color: var(--fd-warn);
+  font-size: var(--fd-size-sm);
 }
 </style>

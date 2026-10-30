@@ -12,7 +12,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import CapabilityBadges from '~/components/CapabilityBadges.vue'
-import { DEVICE_TYPES, useInventory } from '~/composables/useInventory'
+import { DEVICE_TABS, useInventory } from '~/composables/useInventory'
 import type { DeviceInfo, DeviceType } from '~/lib/generated'
 
 const props = withDefaults(
@@ -40,7 +40,7 @@ const emit = defineEmits<{ close: [], confirm: [ieees: string[]] }>()
 
 const { devices, loading, refresh } = useInventory()
 
-const type = ref<DeviceType | 'all'>(props.only ?? 'all')
+const type = ref<string>(props.only ?? 'all')
 const search = ref('')
 const chosen = ref<string[]>([])
 
@@ -73,7 +73,13 @@ const rows = computed(() => {
 
   return devices.value
     .filter(device => !props.exclude.includes(device.ieee))
-    .filter(device => type.value === 'all' || device.device_type === type.value)
+    .filter((device) => {
+      if (type.value === 'all') {
+        return true
+      }
+      const tab = DEVICE_TABS.find(entry => entry.key === type.value)
+      return tab !== undefined && tab.types.includes(device.device_type)
+    })
     .filter((device) => {
       if (needle === '') {
         return true
@@ -86,11 +92,10 @@ const rows = computed(() => {
 /** How many devices each tab holds, after the exclusion. */
 const counts = computed<Record<string, number>>(() => {
   const tally: Record<string, number> = {}
-  for (const device of devices.value) {
-    if (props.exclude.includes(device.ieee)) {
-      continue
-    }
-    tally[device.device_type] = (tally[device.device_type] ?? 0) + 1
+  for (const tab of DEVICE_TABS) {
+    tally[tab.key] = devices.value.filter(
+      device => !props.exclude.includes(device.ieee) && tab.types.includes(device.device_type),
+    ).length
   }
   return tally
 })
@@ -158,7 +163,7 @@ function confirm(): void {
           All <span class="fd-meta fd-muted">{{ rows.length }}</span>
         </button>
         <button
-          v-for="entry in DEVICE_TYPES"
+          v-for="entry in DEVICE_TABS"
           :key="entry.key"
           class="fd-btn fd-btn--ghost fd-btn--sm"
           type="button"

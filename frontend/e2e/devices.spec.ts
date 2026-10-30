@@ -22,12 +22,12 @@ test.describe('devices, the inventory', () => {
     await expect(table).toBeVisible()
 
     const rows = table.getByTestId('device-table-row')
-    await expect(rows).toHaveCount(5)
+    await expect(rows).toHaveCount(7)
 
     await expect(table).toContainText('Kitchen ceiling')
     await expect(table).toContainText('Desk plug')
     await expect(table).toContainText('Hall motion')
-    await expect(page.getByTestId('devices-count')).toContainText('5 of 5')
+    await expect(page.getByTestId('devices-count')).toContainText('7 of 7')
 
     // an unmapped row says so, and offers the reason
     await expect(table.getByTestId('device-why').first()).toContainText('not mapped')
@@ -44,7 +44,7 @@ test.describe('devices, the inventory', () => {
     await expect(page.getByTestId('device-table')).toContainText('Desk plug')
 
     await page.getByTestId('device-tab-all').click()
-    await expect(page.getByTestId('device-table-row')).toHaveCount(5)
+    await expect(page.getByTestId('device-table-row')).toHaveCount(7)
   })
 
   test('the filters narrow by name and by mapping', async ({ page }) => {
@@ -56,10 +56,10 @@ test.describe('devices, the inventory', () => {
     await page.getByTestId('device-search').fill('')
 
     await page.getByTestId('device-supported-filter').selectOption('no')
-    await expect(page.getByTestId('device-table-row')).toHaveCount(3)
+    await expect(page.getByTestId('device-table-row')).toHaveCount(1)
 
     await page.getByTestId('device-supported-filter').selectOption('yes')
-    await expect(page.getByTestId('device-table-row')).toHaveCount(2)
+    await expect(page.getByTestId('device-table-row')).toHaveCount(6)
   })
 
   test('a device that is in no room breaks the chain at the room hop', async ({ page }) => {
@@ -101,6 +101,64 @@ test.describe('devices, the inventory', () => {
     const detail = page.getByTestId('device-detail')
     await expect(detail.getByTestId('device-mapping')).toHaveText('not mapped')
     await expect(detail.getByTestId('device-unsupported-reason')).toContainText('plugs')
+  })
+
+  test('the four sensor tabs each show their own class', async ({ page }) => {
+    await page.goto('#/devices')
+
+    await page.getByTestId('device-tab-motion').click()
+    await expect(page.getByTestId('device-table-row')).toHaveCount(1)
+    await expect(page.getByTestId('device-table')).toContainText('Hall motion')
+
+    // climate is the one tab for a temperature and a light level
+    await page.getByTestId('device-tab-climate').click()
+    await expect(page.getByTestId('device-table-row')).toHaveCount(1)
+    await expect(page.getByTestId('device-table')).toContainText('Bedroom climate')
+
+    // a contact sensor is on its own tab, never beside the motion one
+    await page.getByTestId('device-tab-contact').click()
+    await expect(page.getByTestId('device-table-row')).toHaveCount(1)
+    await expect(page.getByTestId('device-table')).toContainText('Back door')
+    await expect(page.getByTestId('device-table')).not.toContainText('Hall motion')
+
+    await page.getByTestId('device-tab-remote').click()
+    await expect(page.getByTestId('device-table-row')).toHaveCount(1)
+    await expect(page.getByTestId('device-table')).toContainText('Bedside switch')
+  })
+
+  test('a sensor row carries its reading and a low battery warns', async ({ page }) => {
+    await page.goto('#/devices')
+
+    await page.getByTestId('device-tab-climate').click()
+    const row = page.getByTestId('device-table-row').first()
+    await expect(row.getByTestId('device-readout')).toContainText('21.4 °C')
+    await expect(row.getByTestId('device-battery-warn')).toContainText('battery 12 %')
+  })
+
+  test('a reading that arrives live lands in the detail strip', async ({ page, request }) => {
+    await page.goto('#/devices')
+
+    await page.getByTestId('device-table').getByRole('button', { name: 'Hall motion' }).click()
+    const detail = page.getByTestId('device-detail')
+    await expect(detail).toBeVisible()
+    await expect(detail.getByTestId('device-events-empty')).toBeVisible()
+
+    await request.post('__event', {
+      data: { ieee: '0x00158d0000000020', kind: 'occupancy', value: true },
+    })
+
+    const strip = detail.getByTestId('device-events')
+    await expect(strip).toBeVisible()
+    await expect(strip).toContainText('occupancy')
+    await expect(strip).toContainText('motion')
+  })
+
+  test('a remote shows its last press as a chip', async ({ page }) => {
+    await page.goto('#/devices')
+
+    await page.getByTestId('device-table').getByRole('button', { name: 'Bedside switch' }).click()
+    const detail = page.getByTestId('device-detail')
+    await expect(detail.getByTestId('device-action-chip')).toHaveText('single')
   })
 
   test('the join window is opened from the Devices head', async ({ page }) => {
