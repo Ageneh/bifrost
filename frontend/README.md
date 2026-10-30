@@ -53,10 +53,14 @@ hand-writes the block down to the fields the shell reads.
 ## Layout
 
 - `components/` — the shell and its primitives (`AppShell`, `SideNav`,
-  `StatusPill`, `StatTile`, `DataTable`, `AsyncState`, `AttentionRow`,
-  `ImpactList`, `ConfirmDialog`, `ToastHost`, `ConfigField`) and the draft
-  surface (`DraftBar`, `DraftPill`, `DiffDrawer`, `ChangeRow`,
-  `ApplyProgress`, `RestartBanner`).
+  `StatusPill`, `DataTable`, `AsyncState`, `AttentionRow`, `HealthStrip`,
+  `ImpactList`, `ConfirmDialog`, `ToastHost`, `ConfigField`, `BridgeForm`,
+  `SystemTabs`) and the draft surface (`DraftBar`, `DraftPill`, `DiffDrawer`,
+  `ChangeRow`, `ApplyProgress`, `RestartBanner`). `StatTile` is a readout
+  primitive for screens that need one; Home does not use it.
+- `lib/doctor.ts` — Home's derivation: which rows need attention, in which
+  order, and what the health strip reports. Pure functions over the API and
+  socket data, so the doctor has no state of its own.
 - `composables/` — `useApi` (session and client), `useDraft` (revision, 409
   conflicts, apply), `useLiveSocket` (the `/bifrost/ws` connection),
   `useToast`.
@@ -64,7 +68,20 @@ hand-writes the block down to the fields the shell reads.
   size and radius is a token; components carry no raw hex values.
 - `e2e/` — the Playwright cases; `scripts/serve.mjs` stands in for the Rust
   server and injects the same base elements, so the tests run behind a real
-  path prefix.
+  path prefix. It also keeps an in-memory draft that honours revisions, the
+  RFC 7386 merge patch and an apply that consumes the draft, so an edit on a
+  screen is exercised end to end.
+
+## Screens
+
+- `#/` — Home, the doctor: the attention list (critical rows, then warnings,
+  then one resolved row, each opening its cause and fix), the health strip,
+  at most three quick actions and the draft. No KPI tiles.
+- `#/system/bridge` — Bridge and network: name, MAC (read-only), IP, netmask,
+  gateway, timezone and the three ports, each labelled with what saving it
+  costs (`hot`, `restart`, `restart required`). Saving writes the draft only.
+- `#/system` redirects to the Bridge tab. The other System tabs stay visible
+  and disabled until their tickets build them.
 
 ## Narrow screens
 

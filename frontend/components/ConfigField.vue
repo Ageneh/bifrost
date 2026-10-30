@@ -21,6 +21,7 @@ export type FieldKind
     | 'secret'
     | 'url'
     | 'mac'
+    | 'ipv4'
     | 'timezone'
     | 'duration'
 
@@ -44,6 +45,12 @@ export interface FieldMeta {
   /** A secret that is already stored; the input starts empty. */
   secretSet?: boolean
   readOnly?: boolean
+  /**
+   * What saving this field costs, shown in the label: `hot` takes effect at
+   * once, `restart` restarts a listener or a backend, `restart required`
+   * needs the whole process to restart.
+   */
+  blast?: 'hot' | 'restart' | 'restart required'
 }
 
 const props = withDefaults(
@@ -75,6 +82,8 @@ const localError = computed(() => {
       return value === '' || value === null || /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(value))
         ? null
         : 'A MAC address looks like 00:11:22:33:44:55.'
+    case 'ipv4':
+      return isIpv4(value) ? null : 'An IPv4 address looks like 10.0.0.20.'
     case 'url':
       try {
         new URL(String(value))
@@ -99,6 +108,18 @@ function update(event: Event): void {
   emit('update:modelValue', normalise(raw))
 }
 
+/** Four decimal octets, each 0-255; leading zeros are allowed. */
+function isIpv4(value: unknown): boolean {
+  if (value === '' || value === null) {
+    return true
+  }
+  const parts = String(value).split('.')
+  return (
+    parts.length === 4
+    && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  )
+}
+
 function normalise(value: string | boolean): string | number | boolean | null {
   if (typeof value === 'boolean') {
     return value
@@ -119,7 +140,13 @@ function normalise(value: string | boolean): string | number | boolean | null {
     <label
       class="fd-label"
       :for="`${testid}-input`"
-    >{{ field.label }}</label>
+    >
+      {{ field.label }}<span
+        v-if="field.blast"
+        class="fd-meta blast"
+        :data-testid="`${testid}-blast`"
+      > · {{ field.blast }}</span>
+    </label>
 
     <div
       v-if="field.kind === 'switch'"
@@ -197,3 +224,13 @@ function normalise(value: string | boolean): string | number | boolean | null {
     >{{ field.hint }}</span>
   </div>
 </template>
+
+<style scoped>
+.blast {
+  color: var(--fd-text-3);
+  font-size: var(--fd-size-micro);
+  letter-spacing: var(--fd-track-micro);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+</style>

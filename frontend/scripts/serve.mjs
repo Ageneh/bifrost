@@ -4,9 +4,11 @@
  *
  * It mirrors what `src/routes/ui.rs` does in production — injects a
  * `<base href>` and `window.__BIFROST_BASE__` from the path it is served
- * under, serves the shell for unknown non-API paths — and answers the few
- * admin endpoints the shell reads with fixed fixtures, so the end-to-end
- * test exercises a signed-in console behind an ingress prefix.
+ * under, serves the shell for unknown non-API paths — and answers the admin
+ * endpoints the screens read and write with in-memory fixtures, so the
+ * end-to-end tests exercise a signed-in console behind an ingress prefix
+ * against state that behaves like the real draft: revision-checked writes,
+ * a merge patch that follows RFC 7386, and an apply that consumes the draft.
  *
  * Usage: node scripts/serve.mjs [--port 4319] [--prefix /api/hassio_ingress/test]
  */
@@ -78,31 +80,87 @@ const SERVICES = {
   },
 }
 
-const DRAFT = {
+/** Mutable draft state, so a PATCH is visible on the next read. */
+const draft = {
   revision: 3,
-  updated_at: '2026-10-30T10:00:00Z',
-  config: { ...ACTIVE_CONFIG, rooms: { office: { name: 'Studio', icon: 'office' } } },
-  validation: [],
+  updatedAt: '2026-10-30T10:00:00Z',
+  config: null,
 }
 
-const DIFF = [
-  { path: 'rooms.office.name', before: 'Office', after: 'Studio', secret: false },
-  { path: 'z2m.garage.token', before: null, after: null, secret: true },
-]
-
-const JSON_ROUTES = {
-  'auth/session': {
-    authenticated: true,
-    setup_required: false,
-    ingress: false,
-    csrf: 'test-csrf',
-  },
-  'config': ACTIVE_CONFIG,
-  'config/draft': DRAFT,
-  'config/diff': DIFF,
-  'config/validate': [],
-  'service': SERVICES,
+function initialDraftConfig() {
+  const config = structuredClone(ACTIVE_CONFIG)
+  config.rooms = { office: { name: 'Studio', icon: 'office' } }
+  return config
 }
+
+draft.config = initialDraftConfig()
+
+// ---- document helpers --------------------------------------------------
+
+function isObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function leafPaths(document, prefixPath = '') {
+  if (!isObject(document)) {
+    return prefixPath === '' ? [] : [prefixPath]
+  }
+  const paths = []
+  for (const key of Object.keys(document).sort()) {
+    const path = prefixPath === '' ? key : `${prefixPath}.${key}`
+    const value = document[key]
+    if (isObject(value) && Object.keys(value).length > 0) {
+      paths.push(...leafPaths(value, path))
+    }
+    else {
+      paths.push(path)
+    }
+  }
+  return paths
+}
+
+function getPath(document, path) {
+  let current = document
+  for (const key of path.split('.')) {
+    if (!isObject(current) || !(key in current)) {
+      return undefined
+    }
+    current = current[key]
+  }
+  return current
+}
+
+/** RFC 7386 merge patch, the same rule the Rust side applies. */
+function mergePatch(target, patch) {
+  if (!isObject(patch)) {
+    return structuredClone(patch)
+  }
+  const result = isObject(target) ? target : {}
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete result[key]
+    }
+    else {
+      result[key] = mergePatch(result[key], value)
+    }
+  }
+  return result
+}
+
+function diffDocuments(before, after) {
+  const paths = new Set([...leafPaths(before), ...leafPaths(after)])
+  const changes = []
+  for (const path of [...paths].sort()) {
+    const from = getPath(before, path) ?? null
+    const to = getPath(after, path) ?? null
+    if (JSON.stringify(from) !== JSON.stringify(to)) {
+      changes.push({ path, before: from, after: to, secret: false })
+    }
+  }
+  return changes
+}
+
+// ---- responses ---------------------------------------------------------
 
 function send(response, status, body, type = 'application/json') {
   response.writeHead(status, {
@@ -111,6 +169,28 @@ function send(response, status, body, type = 'application/json') {
     'x-content-type-options': 'nosniff',
   })
   response.end(body)
+}
+
+function sendJson(response, body) {
+  send(response, 200, JSON.stringify(body))
+}
+
+function draftResponse() {
+  return {
+    revision: draft.revision,
+    updated_at: draft.config === null ? null : draft.updatedAt,
+    config: draft.config,
+    validation: [],
+  }
+}
+
+async function readJson(request) {
+  const chunks = []
+  for await (const chunk of request) {
+    chunks.push(chunk)
+  }
+  const text = Buffer.concat(chunks).toString('utf8')
+  return text === '' ? null : JSON.parse(text)
 }
 
 async function sendFile(response, path) {
@@ -140,6 +220,80 @@ async function sendShell(response) {
   send(response, 200, injected, 'text/html; charset=utf-8')
 }
 
+/** Every `/bifrost/*` endpoint the console uses, by method and path. */
+async function handleApi(request, response, endpoint) {
+  const method = request.method ?? 'GET'
+
+  if (endpoint === 'auth/session') {
+    return sendJson(response, {
+      authenticated: true,
+      setup_required: false,
+      ingress: false,
+      csrf: 'test-csrf',
+    })
+  }
+
+  if (endpoint === 'config' && method === 'GET') {
+    return sendJson(response, ACTIVE_CONFIG)
+  }
+
+  if (endpoint === 'service' && method === 'GET') {
+    return sendJson(response, SERVICES)
+  }
+
+  if (endpoint.startsWith('service/') && method === 'PUT') {
+    return sendJson(response, endpoint.slice('service/'.length))
+  }
+
+  if (endpoint === 'config/draft') {
+    if (method === 'GET') {
+      return sendJson(response, draftResponse())
+    }
+    if (method === 'PATCH' || method === 'PUT') {
+      const body = await readJson(request)
+      if (body !== null && body.revision !== draft.revision) {
+        return send(response, 409, JSON.stringify({ error: 'The draft moved on', errors: [] }))
+      }
+      const base = draft.config ?? structuredClone(ACTIVE_CONFIG)
+      draft.config
+        = method === 'PATCH' ? mergePatch(structuredClone(base), body?.patch ?? {}) : body?.config
+      draft.revision += 1
+      return sendJson(response, draftResponse())
+    }
+    if (method === 'DELETE') {
+      draft.config = null
+      draft.revision += 1
+      return sendJson(response, { revision: draft.revision })
+    }
+  }
+
+  if (endpoint === 'config/diff' && method === 'GET') {
+    return sendJson(response, diffDocuments(ACTIVE_CONFIG, draft.config ?? ACTIVE_CONFIG))
+  }
+
+  if (endpoint === 'config/validate' && method === 'POST') {
+    return sendJson(response, [])
+  }
+
+  if (endpoint === 'config/apply' && method === 'POST') {
+    const changes = diffDocuments(ACTIVE_CONFIG, draft.config ?? ACTIVE_CONFIG)
+    const revision = draft.revision + 1
+    draft.config = null
+    draft.revision = revision
+    return sendJson(response, {
+      revision,
+      plan: { hot: changes.map(change => ({ action: 'update', path: change.path })), restart_required: [] },
+      changes,
+    })
+  }
+
+  if (endpoint === 'config/restart' && method === 'POST') {
+    return send(response, 204, '')
+  }
+
+  return send(response, 404, JSON.stringify({ error: 'not found', errors: [] }))
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
   const path = url.pathname
@@ -152,10 +306,12 @@ const server = createServer(async (request, response) => {
 
   if (rest.startsWith('bifrost/')) {
     const endpoint = rest.slice('bifrost/'.length).replace(/\/+$/, '')
-    if (endpoint in JSON_ROUTES) {
-      return send(response, 200, JSON.stringify(JSON_ROUTES[endpoint]))
+    try {
+      return await handleApi(request, response, endpoint)
     }
-    return send(response, 404, JSON.stringify({ error: 'not found', errors: [] }))
+    catch (error) {
+      return send(response, 500, JSON.stringify({ error: String(error), errors: [] }))
+    }
   }
 
   if (rest !== '' && !rest.endsWith('/')) {
