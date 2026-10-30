@@ -63,6 +63,7 @@ const KNOWN_ROUTES: &[&str] = &[
     "/bifrost/auth/session",
     "/bifrost/auth/login",
     "/bifrost/auth/password",
+    "/bifrost/entertainment/capabilities",
 ];
 
 /// `bridge.ipaddress` of [`MINIMAL_CONFIG`].
