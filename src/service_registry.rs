@@ -79,10 +79,14 @@ impl ServiceFactory for AppServiceFactory {
             )?
             .boxed(),
             SSDP_SERVICE => SsdpService::new(bridge.mac, bridge.ipaddress, state.updater()).boxed(),
-            ENTERTAINMENT_SERVICE => {
-                EntertainmentService::new(bridge.ipaddress, bridge.entm_port, state.res.clone())?
-                    .boxed()
-            }
+            ENTERTAINMENT_SERVICE => EntertainmentService::new(
+                bridge.ipaddress,
+                bridge.entm_port,
+                state.res.clone(),
+                state.streams(),
+                state.store(),
+            )?
+            .boxed(),
             _ => {
                 return Err(svc::error::SvcError::ServiceNotFound(ServiceId::from(
                     name.to_string(),

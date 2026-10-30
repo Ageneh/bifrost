@@ -107,6 +107,8 @@ pub struct BifrostConfig {
     /// it.
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub entertainment: EntertainmentConfig,
     #[serde(flatten)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
@@ -118,9 +120,41 @@ impl Default for BifrostConfig {
             state_file: default_state_file(),
             cert_file: default_cert_file(),
             auth: AuthConfig::default(),
+            entertainment: EntertainmentConfig::default(),
             unknown: UnknownSettings::new(),
         }
     }
+}
+
+/// Entertainment streaming settings.
+///
+/// A real bridge advertises one stream. Two are what a TV running
+/// Ambilight+Hue and a second Sync client need at the same time, which is
+/// the case Bifrost exists to serve, so that is the default. The value is
+/// also written into the bridge's own `Entertainment` resource on load: the
+/// resource is persisted with the state, and an install that was created
+/// before this setting existed would otherwise keep advertising one.
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentConfig {
+    #[serde(default = "default_max_streams")]
+    pub max_streams: u32,
+    #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub unknown: UnknownSettings,
+}
+
+impl Default for EntertainmentConfig {
+    fn default() -> Self {
+        Self {
+            max_streams: default_max_streams(),
+            unknown: UnknownSettings::new(),
+        }
+    }
+}
+
+const fn default_max_streams() -> u32 {
+    2
 }
 
 /// Pairing settings.
@@ -444,6 +478,16 @@ impl Debug for BifrostConfig {
             .field("state_file", &self.state_file)
             .field("cert_file", &self.cert_file)
             .field("auth", &self.auth)
+            .field("entertainment", &self.entertainment)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for EntertainmentConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntertainmentConfig")
+            .field("max_streams", &self.max_streams)
             .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }

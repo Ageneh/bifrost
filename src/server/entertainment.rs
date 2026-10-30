@@ -14,6 +14,7 @@ use openssl::ssl::{Ssl, SslContext, SslMethod};
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_openssl::SslStream;
 use udp_stream::{UdpListenBuilder, UdpListener, UdpStream};
@@ -28,29 +29,62 @@ use hue::stream::{
 };
 use svc::traits::Service;
 
+use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
 use crate::resource::Resources;
 use crate::routes::auth::STANDARD_CLIENT_KEY;
+use crate::server::streams::StreamRegistry;
 
 pub struct EntertainmentService {
     addr: SocketAddr,
     udp: Option<Arc<UdpListener>>,
-    ctx: Option<SslContext>,
+    ctx: Option<Arc<SslContext>>,
     res: Arc<Mutex<Resources>>,
+    streams: Arc<StreamRegistry>,
+    /// Read on every accept, so a changed `bifrost.entertainment.max_streams`
+    /// applies without restarting the listener.
+    store: Arc<ConfigStore>,
 }
 
 impl EntertainmentService {
-    pub fn new(addr: Ipv4Addr, port: u16, res: Arc<Mutex<Resources>>) -> ApiResult<Self> {
+    pub fn new(
+        addr: Ipv4Addr,
+        port: u16,
+        res: Arc<Mutex<Resources>>,
+        streams: Arc<StreamRegistry>,
+        store: Arc<ConfigStore>,
+    ) -> ApiResult<Self> {
         let res = Self {
             addr: SocketAddr::new(addr.into(), port),
             udp: None,
             ctx: None,
             res,
+            streams,
+            store,
         };
 
         Ok(res)
     }
 
+    /// How many sessions may stream at once.
+    fn max_streams(&self) -> usize {
+        usize::try_from(self.store.active().bifrost.entertainment.max_streams)
+            .unwrap_or(1)
+            .max(1)
+    }
+}
+
+/// One DTLS session: everything a stream needs, and nothing that outlives it.
+///
+/// A session runs on its own task, so a sender that panics, stalls or
+/// disappears takes nothing else with it.
+#[derive(Clone)]
+pub struct Session {
+    res: Arc<Mutex<Resources>>,
+    streams: Arc<StreamRegistry>,
+}
+
+impl Session {
     async fn read_frame(sess: &mut SslStream<UdpStream>, buf: &mut [u8]) -> ApiResult<usize> {
         const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -191,7 +225,8 @@ impl EntertainmentService {
         }
     }
 
-    pub async fn run_loop(&self, mut sess: SslStream<UdpStream>) -> ApiResult<()> {
+    /// Accept the DTLS handshake, then stream until the sender stops.
+    pub async fn run(&self, mut sess: SslStream<UdpStream>) -> ApiResult<()> {
         let mut buf = [0u8; 1024];
 
         timeout(Duration::from_secs(5), Pin::new(&mut sess).accept())
@@ -218,6 +253,9 @@ impl EntertainmentService {
         drop(lock);
 
         let area = header.area;
+        log::info!("Entertainment stream started for area {area}");
+        self.streams.open(area);
+
         let result = self.pump(&mut sess, &mut buf, sz, &header).await;
 
         // the area is the only thing that names what to stop, and it is known
@@ -229,6 +267,13 @@ impl EntertainmentService {
             .backend_request(BackendRequest::EntertainmentStop(area))
         {
             log::warn!("Could not announce the end of stream {area}: {err}");
+        }
+
+        match &result {
+            Ok(()) => self.streams.close(&area),
+            // a stream that ended badly stays listed, with its reason, so the
+            // diagnostics screen can say why the TV's picture went dark
+            Err(err) => self.streams.set_error(&area, &err.to_string()),
         }
 
         result
@@ -270,6 +315,7 @@ impl EntertainmentService {
             }
 
             fps += 1;
+            self.streams.frame_in(&pkt.area);
             let req = BackendRequest::EntertainmentFrame(pkt.area, pkt.lights);
             self.res.lock().await.backend_request(req)?;
 
@@ -299,7 +345,7 @@ impl Service for EntertainmentService {
             Ok(16)
         });
 
-        self.ctx = Some(bldr.build());
+        self.ctx = Some(Arc::new(bldr.build()));
         Ok(())
     }
 
@@ -322,18 +368,61 @@ impl Service for EntertainmentService {
             return Err(ApiError::service_error("Udp not initialized"));
         };
 
-        let Some(ctx) = self.ctx.as_ref() else {
+        let Some(ctx) = self.ctx.clone() else {
             return Err(ApiError::service_error("Ctx not initialized"));
         };
 
-        loop {
-            let (socket, _addr) = udp.accept().await?;
-            let ssl = Ssl::new(ctx)?;
-            let stream = SslStream::new(ssl, socket)?;
+        let session = Session {
+            res: self.res.clone(),
+            streams: self.streams.clone(),
+        };
 
-            match self.run_loop(stream).await {
-                Ok(()) => log::info!("Entertainment stream finished"),
-                Err(err) => log::error!("Entertainment stream error: {err}"),
+        // one task per session, reaped here: a sender that panics ends its
+        // own task and the listener keeps accepting
+        let mut sessions = JoinSet::new();
+
+        loop {
+            tokio::select! {
+                accepted = udp.accept() => {
+                    let (socket, addr) = accepted?;
+
+                    let limit = self.max_streams();
+                    if sessions.len() >= limit {
+                        log::warn!(
+                            "Refusing an entertainment stream from {addr}: {limit} already running"
+                        );
+                        // dropping the socket leaves the sender without a
+                        // handshake, which is how a busy bridge answers
+                        drop(socket);
+                        continue;
+                    }
+
+                    let ssl = Ssl::new(&ctx)?;
+                    let stream = SslStream::new(ssl, socket)?;
+                    let session = session.clone();
+
+                    sessions.spawn(async move {
+                        let result = session.run(stream).await;
+                        (addr, result)
+                    });
+                }
+
+                Some(finished) = sessions.join_next(), if !sessions.is_empty() => {
+                    match finished {
+                        Ok((addr, Ok(()))) => {
+                            log::info!("Entertainment stream from {addr} finished");
+                        }
+                        Ok((addr, Err(err))) => {
+                            log::error!("Entertainment stream from {addr} error: {err}");
+                        }
+                        Err(err) if err.is_panic() => {
+                            log::error!("Entertainment stream panicked; still listening");
+                        }
+                        Err(err) => {
+                            log::error!("Entertainment stream task failed: {err}");
+                        }
+                    }
+                }
             }
         }
     }

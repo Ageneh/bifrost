@@ -21,6 +21,7 @@ use crate::inventory::Inventory;
 use crate::model::state::{State, StateVersion};
 use crate::resource::Resources;
 use crate::server::certificate;
+use crate::server::streams::StreamRegistry;
 use crate::server::updater::VersionUpdater;
 
 /// Seconds a pairing window stays open when the request names none.
@@ -182,6 +183,7 @@ pub struct AppState {
     inventory: Arc<Inventory>,
     backends: Arc<BackendCommands>,
     link_button: Arc<LinkButtonState>,
+    streams: Arc<StreamRegistry>,
 }
 
 impl AppState {
@@ -233,6 +235,12 @@ impl AppState {
 
         res.reset_all_streaming()?;
 
+        // the bridge's entertainment resource is persisted with the state,
+        // and it is what a client reads to decide how many streams it may
+        // open: an install created before this setting existed would keep
+        // advertising one forever
+        res.patch_max_streams(config.bifrost.entertainment.max_streams)?;
+
         let res = Arc::new(Mutex::new(res));
 
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -256,6 +264,7 @@ impl AppState {
             inventory: Inventory::new(),
             backends: Arc::new(BackendCommands::default()),
             link_button: Arc::new(LinkButtonState::new(clock)),
+            streams: Arc::new(StreamRegistry::new()),
         })
     }
 
@@ -276,6 +285,12 @@ impl AppState {
     pub fn with_link_button_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.link_button = Arc::new(LinkButtonState::new(clock));
         self
+    }
+
+    /// The entertainment streams that are running.
+    #[must_use]
+    pub fn streams(&self) -> Arc<StreamRegistry> {
+        self.streams.clone()
     }
 
     /// The device registry every z2m backend publishes into.

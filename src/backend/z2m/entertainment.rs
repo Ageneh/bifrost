@@ -26,7 +26,7 @@ pub struct AreaStream {
 
 impl AreaStream {
     #[must_use]
-    pub fn new(stream: EntStream, throttle: Throttle) -> Self {
+    pub const fn new(stream: EntStream, throttle: Throttle) -> Self {
         Self { stream, throttle }
     }
 }

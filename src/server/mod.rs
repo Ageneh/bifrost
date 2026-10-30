@@ -8,6 +8,7 @@ pub mod http;
 pub mod hueevents;
 pub mod mdns;
 pub mod ssdp;
+pub mod streams;
 pub mod updater;
 
 use std::fs::File;

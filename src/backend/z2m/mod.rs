@@ -42,6 +42,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::inventory::{GroupRef, Inventory};
 use crate::resource::Resources;
 use crate::server::appstate::AppState;
+use crate::server::streams::StreamRegistry;
 
 #[derive(Error, Debug)]
 pub enum TemplateError {
@@ -145,6 +146,7 @@ impl ServiceTemplate for Z2mServiceTemplate {
         )
         .map_err(SvcError::generation)?
         .with_inventory(self.state.inventory())
+        .with_streams(self.state.streams())
         .with_commands(self.state.backends());
 
         Ok(svc.boxed())
@@ -177,6 +179,9 @@ pub struct Z2mBackend {
     /// Where what this backend learns is published. Absent in a unit test
     /// that drives the backend without one.
     inventory: Option<Arc<Inventory>>,
+    /// Where the entertainment streams are counted, absent in a unit test
+    /// that drives the backend without one.
+    streams: Option<Arc<StreamRegistry>>,
     /// The channel the admin API reaches this backend on.
     commands: Option<Arc<BackendCommands>>,
     /// This instance's claim on that channel, taken when it starts.
@@ -228,6 +233,7 @@ impl Z2mBackend {
             message_tx,
             socket: None,
             inventory: None,
+            streams: None,
             commands: None,
             command_token: None,
             command_rx: None,
@@ -241,6 +247,13 @@ impl Z2mBackend {
     #[must_use]
     pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
         self.inventory = Some(inventory);
+        self
+    }
+
+    /// Count this backend's frames in `streams`.
+    #[must_use]
+    pub fn with_streams(mut self, streams: Arc<StreamRegistry>) -> Self {
+        self.streams = Some(streams);
         self
     }
 

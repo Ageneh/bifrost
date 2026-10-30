@@ -452,7 +452,13 @@ impl Z2mBackend {
         frame: &HueStreamLightsV2,
     ) -> ApiResult<()> {
         if let Some(es) = self.entstreams.get_mut(area) {
-            if es.throttle.tick() {
+            let forwarded = es.throttle.tick();
+
+            if let Some(streams) = &self.streams {
+                streams.frame_out(area, forwarded);
+            }
+
+            if forwarded {
                 es.stream.frame(z2mws, frame).await?;
             }
         }

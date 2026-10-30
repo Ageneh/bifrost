@@ -67,6 +67,14 @@ impl Resources {
         self.state_updates.notify_one();
     }
 
+    /// Advertise `max_streams` on the bridge's entertainment resource; see
+    /// [`State::patch_max_streams`].
+    pub fn patch_max_streams(&mut self, max_streams: u32) -> ApiResult<()> {
+        self.state.patch_max_streams(max_streams)?;
+        self.state_updates.notify_one();
+        Ok(())
+    }
+
     pub fn reset_all_streaming(&mut self) -> ApiResult<()> {
         for id in self.get_resource_ids_by_type(RType::Light) {
             let light: &Light = self.get_id(id)?;
