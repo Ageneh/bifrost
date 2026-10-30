@@ -404,7 +404,7 @@ async fn get_api_user_resource(
         ApiResourceType::Lights => Ok(Json(json!(get_lights(lock)?))),
         ApiResourceType::Groups => Ok(Json(json!(get_groups(lock, false)?))),
         ApiResourceType::Scenes => Ok(Json(json!(get_scenes(&username, lock)?))),
-        ApiResourceType::Sensors => Ok(Json(json!(get_sensors(lock)?))),
+        ApiResourceType::Sensors => Ok(Json(json!(sensors_with_daylight(lock)?))),
         ApiResourceType::Resourcelinks | ApiResourceType::Rules | ApiResourceType::Schedules => {
             Ok(Json(json!({})))
         }

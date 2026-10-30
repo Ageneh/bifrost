@@ -114,6 +114,12 @@ impl MockZ2m {
         Self::start(&fixture_path(&format!("w04/devices-{class}.json"))).await
     }
 
+    /// Start the mock on a wave-9 capture: one device of `class`, followed
+    /// by the reading it sends when something happens.
+    pub async fn start_w09(class: &str) -> Result<Self> {
+        Self::start(&fixture_path(&format!("w09/{class}.json"))).await
+    }
+
     /// Start the mock on the wave-5 fixture, `tests/fixtures/w05/z2m/bridge.json`:
     /// three lights, one of them in no group.
     pub async fn start_w05() -> Result<Self> {

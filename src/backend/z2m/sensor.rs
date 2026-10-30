@@ -78,10 +78,12 @@ pub fn is_active(device: &Device, property: &str, raw: bool) -> bool {
 /// The JSON value the device declares as "on" for `property`.
 fn value_on(device: &Device, property: &str) -> Option<bool> {
     for expose in flatten(device.exposes()) {
-        if let Expose::Binary(binary) = expose
-            && binary.base.property.as_deref() == Some(property)
-        {
-            return binary.value_on.as_bool();
+        // a nested `if` rather than a let-chain: the image builds on the
+        // workspace's minimum Rust, where `if let … && …` is not stable yet
+        if let Expose::Binary(binary) = expose {
+            if binary.base.property.as_deref() == Some(property) {
+                return binary.value_on.as_bool();
+            }
         }
     }
     None
@@ -91,10 +93,10 @@ fn value_on(device: &Device, property: &str) -> Option<bool> {
 #[must_use]
 pub fn unit_of(device: &Device, property: &str) -> Option<String> {
     for expose in flatten(device.exposes()) {
-        if let Expose::Numeric(numeric) = expose
-            && numeric.base.property.as_deref() == Some(property)
-        {
-            return numeric.unit.clone();
+        if let Expose::Numeric(numeric) = expose {
+            if numeric.base.property.as_deref() == Some(property) {
+                return numeric.unit.clone();
+            }
         }
     }
     None
