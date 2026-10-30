@@ -21,6 +21,13 @@
 //! device leaves ([`MockZ2m::remove_device`]), when one is reachable or not
 //! ([`MockZ2m::set_availability`]), and when the server itself goes away
 //! ([`MockZ2m::drop_connection`]).
+//!
+//! The wave-10 promotion finishes the backbone the whole suite rests on:
+//! every `<name>/set` is counted per friendly name ([`MockZ2m::set_count`]),
+//! so a test can assert one light was told and another was not; scene
+//! store/recall/remove and group member add/remove travel the same paths
+//! z2m uses and are answered on `bridge/response/<same>`; and a client that
+//! reconnects after [`MockZ2m::drop_connection`] gets the greeting again.
 
 // every test binary compiles its own copy of this module, and each uses a
 // different part of the handle
@@ -50,6 +57,8 @@ struct Shared {
     /// The friendly name of every device the greeting announces, by address.
     names: std::collections::HashMap<String, String>,
     received: Mutex<Vec<RawMessage>>,
+    /// `<name>/set` messages, counted by the friendly name they address.
+    sets: Mutex<std::collections::HashMap<String, usize>>,
     connections: AtomicUsize,
     outbound: broadcast::Sender<String>,
     /// Tells every open connection to hang up, as a server going away does.
@@ -59,6 +68,14 @@ struct Shared {
 
 impl Shared {
     fn record(&self, message: RawMessage) {
+        if let Some(name) = message.topic.strip_suffix("/set") {
+            *self
+                .sets
+                .lock()
+                .unwrap()
+                .entry(name.to_string())
+                .or_default() += 1;
+        }
         self.received.lock().unwrap().push(message);
         self.changed.notify_waiters();
     }
@@ -88,6 +105,7 @@ impl MockZ2m {
                 .map(serde_json::to_string)
                 .collect::<serde_json::Result<Vec<_>>>()?,
             received: Mutex::new(vec![]),
+            sets: Mutex::new(std::collections::HashMap::new()),
             connections: AtomicUsize::new(0),
             outbound,
             hang_up,
@@ -124,6 +142,13 @@ impl MockZ2m {
     /// three lights, one of them in no group.
     pub async fn start_w05() -> Result<Self> {
         Self::start(&fixture_path("w05/z2m/bridge.json")).await
+    }
+
+    /// Start the mock on the wave-10 fixture, `tests/fixtures/w10/bridge.json`:
+    /// two lights in one group and one motion sensor, the smallest network
+    /// that still exercises every path the suite leans on.
+    pub async fn start_w10() -> Result<Self> {
+        Self::start(&fixture_path("w10/bridge.json")).await
     }
 
     /// The friendly names of the devices the greeting announces.
@@ -191,6 +216,19 @@ impl MockZ2m {
     #[must_use]
     pub fn received(&self) -> Vec<RawMessage> {
         self.shared.received.lock().unwrap().clone()
+    }
+
+    /// How many `<name>/set` messages a client sent to `name`; a group name
+    /// counts its group-level scene commands, a device name its own updates.
+    #[must_use]
+    pub fn set_count(&self, name: &str) -> usize {
+        self.shared
+            .sets
+            .lock()
+            .unwrap()
+            .get(name)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// The payloads clients sent on `topic`.

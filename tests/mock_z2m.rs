@@ -197,3 +197,166 @@ async fn wait_for_ignores_messages_that_arrived_earlier() {
         "wait_for returned a message that had already arrived"
     );
 }
+
+/// The wave-10 fixture is the small network the promotion tests use: two
+/// lights in one group and one motion sensor.
+#[tokio::test]
+async fn wave_10_fixture_replays_the_small_network() {
+    let mock = MockZ2m::start_w10().await.unwrap();
+    let mut socket = connect(&mock).await;
+
+    let mut topics = vec![];
+    for _ in 0..10 {
+        topics.push(
+            next_message(&mut socket).await["topic"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
+    assert_eq!(
+        topics,
+        [
+            "bridge/state",
+            "bridge/info",
+            "bridge/devices",
+            "bridge/groups",
+            "Kitchen ceiling",
+            "Kitchen ceiling/availability",
+            "Hall lamp",
+            "Hall lamp/availability",
+            "Hall motion/availability",
+            "Hall motion",
+        ]
+    );
+
+    let mut names = mock.device_names();
+    names.sort();
+    assert_eq!(names, ["Hall lamp", "Hall motion", "Kitchen ceiling"]);
+}
+
+/// Scene commands travel on the group's `<name>/set` topic, as z2m takes
+/// them, and are recorded without an answer.
+#[tokio::test]
+async fn scene_commands_are_recorded_on_the_group_topic() {
+    let mock = MockZ2m::start_w10().await.unwrap();
+    let mut socket = connect(&mock).await;
+    for _ in 0..10 {
+        next_message(&mut socket).await;
+    }
+
+    let store = json!({"scene_store": {"ID": 3, "name": "Evening"}});
+    send(&mut socket, "Kitchen/set", store.clone()).await;
+    send(&mut socket, "Kitchen/set", json!({"scene_recall": 3})).await;
+    send(&mut socket, "Kitchen/set", json!({"scene_remove": 3})).await;
+
+    mock.wait_for("Kitchen/set").await;
+    assert_eq!(
+        mock.received_on("Kitchen/set"),
+        [
+            store,
+            json!({"scene_recall": 3}),
+            json!({"scene_remove": 3}),
+        ]
+    );
+    assert_eq!(mock.set_count("Kitchen"), 3);
+
+    // a scene command is not a request: the socket stays quiet
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), socket.next())
+            .await
+            .is_err()
+    );
+}
+
+/// Group membership changes are bridge requests and are answered on the
+/// matching response topic.
+#[tokio::test]
+async fn group_membership_changes_are_answered() {
+    let mock = MockZ2m::start_w10().await.unwrap();
+    let mut socket = connect(&mock).await;
+    for _ in 0..10 {
+        next_message(&mut socket).await;
+    }
+
+    let add = json!({"device": "Hall lamp", "group": "Kitchen"});
+    send(&mut socket, "bridge/request/group/members/add", add.clone()).await;
+    let answer = next_message(&mut socket).await;
+    assert_eq!(answer["topic"], "bridge/response/group/members/add");
+    assert_eq!(answer["payload"]["status"], "ok");
+    assert_eq!(answer["payload"]["data"], add);
+
+    let remove = json!({"device": "Hall lamp", "group": "Kitchen"});
+    send(
+        &mut socket,
+        "bridge/request/group/members/remove",
+        remove.clone(),
+    )
+    .await;
+    let answer = next_message(&mut socket).await;
+    assert_eq!(answer["topic"], "bridge/response/group/members/remove");
+    assert_eq!(answer["payload"]["data"], remove);
+}
+
+/// The `/set` counter is per friendly name, so a test can say one light was
+/// told and another was not.
+#[tokio::test]
+async fn set_count_is_per_light() {
+    let mock = MockZ2m::start_w10().await.unwrap();
+    let mut socket = connect(&mock).await;
+    for _ in 0..10 {
+        next_message(&mut socket).await;
+    }
+
+    send(&mut socket, "Kitchen ceiling/set", json!({"state": "ON"})).await;
+    send(
+        &mut socket,
+        "Kitchen ceiling/set",
+        json!({"brightness": 10}),
+    )
+    .await;
+    send(&mut socket, "Hall lamp/set", json!({"state": "OFF"})).await;
+
+    mock.wait_for("Hall lamp/set").await;
+    assert_eq!(mock.set_count("Kitchen ceiling"), 2);
+    assert_eq!(mock.set_count("Hall lamp"), 1);
+    assert_eq!(mock.set_count("Hall motion"), 0);
+}
+
+/// A server that hangs up is seen as a closed socket; a client that
+/// reconnects gets the greeting again.
+#[tokio::test]
+async fn a_dropped_connection_reconnects_and_gets_the_greeting() {
+    let mock = MockZ2m::start_w10().await.unwrap();
+    let mut socket = connect(&mock).await;
+    for _ in 0..10 {
+        next_message(&mut socket).await;
+    }
+    assert_eq!(mock.connections(), 1);
+
+    mock.drop_connection();
+
+    // the mock stops accepting, so the socket closes instead of answering
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(message) = socket.next().await {
+            if message.is_err() || matches!(message.unwrap(), Message::Close(_)) {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        closed.is_ok(),
+        "the socket stayed open after drop_connection"
+    );
+
+    // the accept loop is still running: a new client is greeted again
+    let mut socket = connect(&mock).await;
+    assert_eq!(mock.connections(), 2);
+    assert_eq!(
+        next_message(&mut socket).await["topic"],
+        "bridge/state",
+        "the reconnected client did not get the greeting"
+    );
+}
