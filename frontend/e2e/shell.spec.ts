@@ -60,30 +60,23 @@ test.describe('the console shell at 390 px', () => {
     await expect(page.getByTestId('draft-pill-apply')).toBeVisible()
   })
 
-  test('collapses the services table into cards', async ({ page }) => {
+  test('turns the rail into a bottom tab bar on a phone', async ({ page }) => {
     await page.goto('')
 
-    const table = page.getByTestId('home-services')
-    await expect(table).toHaveAttribute('data-layout', 'cards')
+    const rail = page.getByTestId('shell-rail')
+    await expect(rail).toBeVisible()
 
-    // the header is gone and the column names move into each cell
-    await expect(table.locator('thead')).toBeHidden()
-    const firstCell = table.locator('tbody tr').first().locator('td').first()
-    await expect(firstCell).toHaveAttribute('data-label', 'Service')
+    const layout = await rail.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { position: style.position, bottom: style.bottom }
+    })
+    expect(layout.position).toBe('fixed')
+    expect(layout.bottom).toBe('0px')
 
-    // the row reads as a block, not as table cells side by side
-    const display = await table.locator('tbody tr').first().evaluate(
-      element => getComputedStyle(element).display,
-    )
-    expect(display).toBe('grid')
+    // a thumb reaches the bottom of a phone and not the top
+    const nav = page.getByTestId('side-nav')
+    const direction = await nav.evaluate(element => getComputedStyle(element).flexDirection)
+    expect(direction).toBe('row')
   })
 
-  test('reports bridge state from the API', async ({ page }) => {
-    await page.goto('')
-
-    await expect(page.getByTestId('stat-servers')).toContainText('2')
-    await expect(page.getByTestId('home-services').locator('tbody tr')).toHaveCount(3)
-    // the failed service raises an attention row
-    await expect(page.getByTestId('home-attention')).toContainText('z2m@garage failed')
-  })
 })

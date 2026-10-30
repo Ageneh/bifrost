@@ -53,10 +53,14 @@ hand-writes the block down to the fields the shell reads.
 ## Layout
 
 - `components/` — the shell and its primitives (`AppShell`, `SideNav`,
-  `StatusPill`, `StatTile`, `DataTable`, `AsyncState`, `AttentionRow`,
+  `StatusPill`, `DataTable`, `AsyncState`, `AttentionRow`, `HealthStrip`,
   `ImpactList`, `ConfirmDialog`, `ToastHost`, `ConfigField`) and the draft
   surface (`DraftBar`, `DraftPill`, `DiffDrawer`, `ChangeRow`,
-  `ApplyProgress`, `RestartBanner`).
+  `ApplyProgress`, `RestartBanner`). `StatTile` is a readout primitive for
+  screens that need one; Home does not use it.
+- `lib/doctor.ts` — Home's derivation: which rows need attention, in which
+  order, and what the health strip reports. Pure functions over the API and
+  socket data, so the doctor has no state of its own.
 - `composables/` — `useApi` (session and client), `useDraft` (revision, 409
   conflicts, apply), `useLiveSocket` (the `/bifrost/ws` connection),
   `useToast`.
