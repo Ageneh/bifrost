@@ -307,7 +307,9 @@ async fn a_zone_is_read_with_its_positions_and_channels() {
             .expect("no entertainment service was imported");
 
         let link = hue::api::RType::Entertainment.link_to(ent_a);
-        support::entertainment::add_area(&mut res, "TV", &[link])
+        let area = add_area(&mut res, "TV", &[link]);
+        drop(res);
+        area
     };
 
     let (status, body) = fixture

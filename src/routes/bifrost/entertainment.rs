@@ -159,6 +159,7 @@ async fn configuration(
 
     let res = state.res.lock().await;
     let Ok(ec) = res.get_id::<EntertainmentConfiguration>(zone) else {
+        drop(res);
         return Ok(not_found().await);
     };
 
@@ -196,7 +197,7 @@ async fn configuration(
             .ok()
             .and_then(|value| value.as_str().map(str::to_string))
             .unwrap_or_default(),
-        status: serde_json::to_value(&ec.status)
+        status: serde_json::to_value(ec.status)
             .ok()
             .and_then(|value| value.as_str().map(str::to_string))
             .unwrap_or_default(),
@@ -207,7 +208,7 @@ async fn configuration(
     .into_response())
 }
 
-fn position_of(position: &hue::api::Position) -> EntertainmentPosition {
+const fn position_of(position: &hue::api::Position) -> EntertainmentPosition {
     EntertainmentPosition {
         x: position.x,
         y: position.y,

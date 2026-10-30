@@ -114,7 +114,7 @@ pub struct EntertainmentZoneChannel {
 }
 
 /// One segment of one service, as a channel addresses it.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct EntertainmentZoneMember {
     /// The entertainment service the segment belongs to.
