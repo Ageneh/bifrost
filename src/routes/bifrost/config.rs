@@ -8,9 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
-use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::future::BoxFuture;
@@ -280,22 +279,7 @@ async fn get_config(State(state): State<AppState>) -> ConfigApiResult<Json<Value
     Ok(Json(redacted_config(&state.config())?))
 }
 
-/// Stopgap until wave 2 adds authentication: refuses every request to the
-/// configuration admin API. Wave 2 replaces this with a real admin check.
-pub async fn require_admin(_req: Request, _next: Next) -> Response {
-    (
-        StatusCode::FORBIDDEN,
-        Json(ErrorResponse {
-            error:
-                "The configuration admin API requires authentication, which is not available yet"
-                    .to_string(),
-            errors: vec![],
-        }),
-    )
-        .into_response()
-}
-
-/// The admin endpoints, without the access guard.
+/// The admin endpoints, without the active configuration.
 pub fn admin_router(hook: ApplyHook) -> Router<AppState> {
     Router::new()
         .route(
@@ -324,12 +308,12 @@ fn reconcile_hook() -> ApplyHook {
     })
 }
 
-/// `GET /bifrost/config` keeps serving the (redacted) active configuration
-/// to existing clients; every admin endpoint sits behind [`require_admin`].
+/// The configuration routes. The access guard is applied by the `/bifrost`
+/// nest, which covers `GET /bifrost/config` too.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(get_config))
-        .merge(admin_router(reconcile_hook()).route_layer(middleware::from_fn(require_admin)))
+        .merge(admin_router(reconcile_hook()))
 }
 
 #[cfg(test)]
@@ -511,7 +495,7 @@ mod tests {
     async fn redacted_round_trip_keeps_secret() {
         let fixture = Fixture::new().await;
 
-        // GET / is served by the unguarded router
+        // the guard sits on the /bifrost nest, so this router serves GET /
         let (_, active) = call(
             &router().with_state(fixture.state.clone()),
             Method::GET,
@@ -734,33 +718,5 @@ mod tests {
             changes,
             json!([{"path": "z2m.server1.token", "before": REDACTED, "after": null, "secret": true}])
         );
-    }
-
-    #[tokio::test]
-    async fn admin_api_is_guarded() {
-        let fixture = Fixture::new().await;
-        let guarded = router().with_state(fixture.state.clone());
-
-        for (method, uri) in [
-            (Method::GET, "/draft"),
-            (Method::PUT, "/draft"),
-            (Method::PATCH, "/draft"),
-            (Method::DELETE, "/draft"),
-            (Method::GET, "/diff"),
-            (Method::GET, "/validate"),
-            (Method::POST, "/validate"),
-            (Method::POST, "/apply"),
-            (Method::POST, "/restart"),
-            (Method::GET, "/export"),
-            (Method::POST, "/import"),
-        ] {
-            let (status, _) =
-                call(&guarded, method.clone(), uri, Some(json!({"revision": 0}))).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-        }
-
-        let (status, _) = call(&guarded, Method::GET, "/", None).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(fixture.state.store().revision(), 0);
     }
 }

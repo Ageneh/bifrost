@@ -200,11 +200,12 @@ Bifrost keeps the active configuration and an optional draft. A draft is
 saved to `config.draft.yaml` next to `config.yaml`, survives a restart, and
 takes effect only when you apply it.
 
-> **Note:** Until authentication lands, every endpoint below except
-> `GET /bifrost/config` answers `403 Forbidden`. A deny-all guard
-> (`require_admin`) covers the admin endpoints, because `/bifrost` accepts
-> unauthenticated requests from any origin. This guard is a stopgap: the
-> next wave replaces it with a real admin check.
+> **Note:** Until authentication lands, every endpoint under `/bifrost`
+> answers `403 Forbidden`, `GET /bifrost/config` included. A deny-all guard
+> (`require_admin`) covers the whole `/bifrost` nest, and `/bifrost` sends no
+> CORS headers: only the Hue routes (`/api`, `/clip`, `/eventstream`,
+> `/auth`, `/updater`, `/licenses`, `/description.xml`) stay open to every
+> origin.
 
 | Endpoint | Purpose |
 |---|---|
