@@ -60,6 +60,32 @@ pub fn redact(value: &mut Value) {
     }
 }
 
+/// `url` without its `token` query parameter, which is how an export hands
+/// out a url it must not carry a secret in.
+#[must_use]
+pub fn without_token(url: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if !parsed.query_pairs().any(|(key, _)| key == "token") {
+        return url.to_string();
+    }
+
+    let rest: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(key, _)| key != "token")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+
+    if rest.is_empty() {
+        parsed.set_query(None);
+    } else {
+        parsed.query_pairs_mut().clear().extend_pairs(rest);
+    }
+
+    parsed.to_string()
+}
+
 /// A redacted copy of `value`.
 #[must_use]
 pub fn redacted(value: &Value) -> Value {
@@ -94,8 +120,15 @@ fn keep_existing(incoming: &mut Value, existing: &Value) {
                 incoming.insert(key.clone(), old.clone());
             }
         } else if URL_KEYS.contains(&key.as_str()) {
+            // a token the caller clears must not come back through the url
+            let token_cleared = incoming.get("token").and_then(Value::as_str) == Some("");
             if let (Some(Value::String(new)), Value::String(old)) = (incoming.get_mut(key), old) {
-                if *new != *old && *new == Z2mServer::sanitize_url(old) {
+                // an unchanged url comes back redacted, or with its token
+                // removed by an export; either way it keeps what it had
+                if !token_cleared
+                    && *new != *old
+                    && (*new == Z2mServer::sanitize_url(old) || *new == without_token(old))
+                {
                     new.clone_from(old);
                 }
             }

@@ -12,6 +12,7 @@ use hue::event::EventBlock;
 use svc::manager::{ServiceEvent, SvmClient};
 
 use crate::config::redact::redacted_app_config;
+use crate::logbuffer;
 use crate::routes::bifrost::BifrostApiResult;
 use crate::server::appstate::AppState;
 use crate::server::hueevents::HueEventRecord;
@@ -73,6 +74,7 @@ impl WebSocketTask {
             id: service_event.id(),
             name,
             state: service_event.state(),
+            last_error: service_event.error().map(ToString::to_string),
         };
 
         Ok(Some(Update::ServiceUpdate(service)))
@@ -86,6 +88,7 @@ impl WebSocketTask {
         drop(lock);
 
         let mut svc_events = self.mgr.subscribe().await?.1;
+        let mut log_events = logbuffer::shared().subscribe();
 
         let app_config = redacted_app_config(&self.state.config())?;
         self.send(Update::AppConfig(app_config)).await?;
@@ -98,6 +101,7 @@ impl WebSocketTask {
                 Some(msg) = self.ws.recv() => self.handle_websocket_message(&msg?),
                 backend_event = backend_events.recv() => self.handle_backend_event(&backend_event?),
                 service_event = svc_events.recv() => self.handle_service_event(service_event).await,
+                log_event = log_events.recv() => Ok(log_event.ok().map(Update::Log)),
                 hue_event = hue_events.recv() => self.handle_hue_event(hue_event?),
             };
 

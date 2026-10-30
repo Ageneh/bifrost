@@ -1,9 +1,12 @@
 pub mod auth;
-pub mod backend;
+pub mod certificate;
 pub mod config;
+pub mod logs;
 pub mod service;
 pub mod setup;
+pub mod state;
 pub mod websocket;
+pub mod z2m;
 
 #[cfg(test)]
 pub mod tests;
@@ -315,8 +318,11 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .nest("/auth", auth::router())
         .nest("/service", service::router())
-        .nest("/backend", backend::router())
+        .nest("/bridge/certificate", certificate::router())
+        .nest("/z2m", z2m::router())
         .nest("/config", config::router())
+        .nest("/logs", logs::router())
+        .nest("/state", state::router())
         .route("/ws", any(websocket))
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state, require_admin))

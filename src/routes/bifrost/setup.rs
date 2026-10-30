@@ -806,9 +806,11 @@ mod tests {
             "/bifrost/config/export",
             "/bifrost/config/restart",
             "/bifrost/service",
-            "/bifrost/backend/z2m/x",
+            "/bifrost/z2m/x",
             "/bifrost/ws",
             "/bifrost/logs",
+            "/bifrost/state/summary",
+            "/bifrost/state/reset",
             "/bifrost/auth/password",
         ] {
             let (status, _) = fixture.call(Method::GET, uri, Some(&session), None).await;

@@ -17,6 +17,8 @@ pub struct Service {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub name: ServiceName,
     pub state: ServiceState,
+    /// Why the service last failed, `null` when it has run since.
+    pub last_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
@@ -38,5 +40,10 @@ impl Client {
     pub async fn service_start(&self, id: Uuid) -> BifrostResult<Uuid> {
         self.put(&format!("service/{id}"), ServiceState::Running)
             .await
+    }
+
+    /// Stop and start the service on the same instance, and report it.
+    pub async fn service_restart(&self, id: Uuid) -> BifrostResult<Service> {
+        self.post(&format!("service/{id}/restart"), ()).await
     }
 }

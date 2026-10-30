@@ -24,6 +24,8 @@ pub struct ServiceInstance {
     tx: watch::Sender<ServiceState>,
     name: ServiceName,
     state: ServiceState,
+    /// Why the service last failed, cleared when it runs again.
+    last_error: Option<String>,
     abort_handle: AbortHandle,
 }
 
@@ -36,16 +38,31 @@ pub type ServiceFunc = Box<
         + Send,
 >;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ServiceEvent {
     id: Uuid,
     state: ServiceState,
+    error: Option<String>,
 }
 
 impl ServiceEvent {
     #[must_use]
     pub const fn new(id: Uuid, state: ServiceState) -> Self {
-        Self { id, state }
+        Self {
+            id,
+            state,
+            error: None,
+        }
+    }
+
+    /// A transition that carries the reason the service failed.
+    #[must_use]
+    pub fn failed(id: Uuid, error: impl Into<String>) -> Self {
+        Self {
+            id,
+            state: ServiceState::Failed,
+            error: Some(error.into()),
+        }
     }
 
     #[must_use]
@@ -57,6 +74,22 @@ impl ServiceEvent {
     pub const fn state(&self) -> ServiceState {
         self.state
     }
+
+    /// Why the service failed, when this transition failed it.
+    #[must_use]
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// A copy of this event with a known error attached, for the snapshot a
+    /// new subscriber receives.
+    #[must_use]
+    fn with_error(mut self, error: Option<String>) -> Self {
+        if self.error.is_none() {
+            self.error = error;
+        }
+        self
+    }
 }
 
 /// A request to a [`ServiceManager`]
@@ -64,6 +97,7 @@ pub enum SvmRequest {
     Stop(RpcRequest<ServiceId, SvcResult<Uuid>>),
     Start(RpcRequest<ServiceId, SvcResult<Uuid>>),
     Status(RpcRequest<ServiceId, SvcResult<ServiceState>>),
+    LastError(RpcRequest<ServiceId, SvcResult<Option<String>>>),
     List(RpcRequest<(), Vec<(Uuid, ServiceName)>>),
     Resolve(RpcRequest<ServiceId, SvcResult<Uuid>>),
     LookupName(RpcRequest<ServiceId, SvcResult<ServiceName>>),
@@ -211,6 +245,14 @@ impl SvmClient {
         self.rpc(SvmRequest::Status, id.service_id()).await?
     }
 
+    /// Why the service last failed, if it did and has not run since.
+    pub async fn last_error(
+        &mut self,
+        id: impl IntoServiceId + Send + 'static,
+    ) -> SvcResult<Option<String>> {
+        self.rpc(SvmRequest::LastError, id.service_id()).await?
+    }
+
     pub async fn list(&mut self) -> SvcResult<Vec<(Uuid, ServiceName)>> {
         self.rpc(SvmRequest::List, ()).await
     }
@@ -248,6 +290,7 @@ impl Debug for SvmRequest {
             Self::Stop(arg0) => f.debug_tuple("Stop").field(arg0).finish(),
             Self::Start(arg0) => f.debug_tuple("Start").field(arg0).finish(),
             Self::Status(arg0) => f.debug_tuple("Status").field(arg0).finish(),
+            Self::LastError(arg0) => f.debug_tuple("LastError").field(arg0).finish(),
             Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
             Self::Register(_arg0) => f.debug_tuple("Register").field(&"<service>").finish(),
             Self::RegisterTemplate(_arg0) => f
@@ -342,6 +385,7 @@ impl ServiceManager {
             tx,
             name: name.clone(),
             state: ServiceState::Registered,
+            last_error: None,
             abort_handle,
         };
 
@@ -471,7 +515,7 @@ impl ServiceManager {
         let mut failed = vec![];
         for (key, sub) in &self.subscribers {
             log::trace!("UPDATE: [sub-{key}] {} -> {:?}", &event.id, &event.state);
-            if sub.send(event).is_err() {
+            if sub.send(event.clone()).is_err() {
                 failed.push(*key);
             }
         }
@@ -497,6 +541,11 @@ impl ServiceManager {
             return;
         };
         svc.state = event.state;
+        // a service that runs again has recovered; keep only a live reason
+        svc.last_error = match event.state {
+            ServiceState::Running => None,
+            _ => event.error.clone().or_else(|| svc.last_error.clone()),
+        };
         log::trace!(
             "[{}] [{}] Service is now {:?}",
             svc.name,
@@ -513,6 +562,10 @@ impl ServiceManager {
             SvmRequest::Stop(rpc) => rpc.respond(|id| self.stop(&id)),
 
             SvmRequest::Status(rpc) => rpc.respond(|id| Ok(self.get(&id)?.state)),
+
+            SvmRequest::LastError(rpc) => {
+                rpc.respond(|id| Ok(self.get(&id)?.last_error.clone()));
+            }
 
             SvmRequest::List(rpc) => rpc.respond(|()| {
                 let mut res = vec![];
@@ -538,7 +591,9 @@ impl ServiceManager {
 
             SvmRequest::Subscribe(rpc) => {
                 for (id, svc) in &self.svcs {
-                    rpc.data().send(ServiceEvent::new(*id, svc.state))?;
+                    rpc.data().send(
+                        ServiceEvent::new(*id, svc.state).with_error(svc.last_error.clone()),
+                    )?;
                 }
 
                 rpc.respond(|tx| {
