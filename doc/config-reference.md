@@ -15,6 +15,7 @@ Besides `config.yaml`, Bifrost writes these files, by default next to it:
 | `config.draft.yaml` | Changes saved through the admin API but not applied yet. |
 | `config.yaml.bak` | The configuration as it was before the last apply. |
 | `state.yaml` | Paired Hue apps, resource ids, scenes and room names (`state_file`). |
+| `sessions.yaml` | Admin login sessions, beside `state.yaml`, readable by the owner only. |
 | `cert.pem` | The HTTPS certificate (`cert_file`). |
 
 Keep all of them together: the Docker Compose setup mounts one `data`
@@ -39,6 +40,47 @@ bifrost:
   # to generate a fresh certificate, rename/move this file
   # (this might require pairing the Hue App again)
   cert_file: "cert.pem"
+
+  # Admin login for the Bifrost web interface and the /bifrost API
+  # [optional!]
+  #
+  # This section cannot be changed through the configuration draft. Bifrost
+  # writes password_hash itself; see "Admin login" below.
+  auth:
+    # hash of the admin password, written by Bifrost
+    #
+    # To reset a lost password: stop Bifrost, delete this line, and start
+    # Bifrost again. It prints a new setup code, and every session ends.
+    password_hash: "$scrypt$..."
+
+    # a session ends this many hours after login, however active
+    session_hours: 12
+
+    # a session ends after this many minutes without a request
+    idle_minutes: 60
+
+    # let Home Assistant Ingress requests in without a Bifrost login
+    #
+    # Home Assistant authenticated the user already. Trust is decided by
+    # the address the connection comes from, never by a header.
+    trust_ingress: true
+
+    # addresses Ingress requests are trusted from
+    #
+    # The default is the Home Assistant Supervisor's Ingress proxy,
+    # 172.30.32.2, the only address Home Assistant's add-on documentation
+    # says Ingress connects from
+    # (https://contributors.home-assistant.io/apps/guides/ingress/).
+    # Do not widen this to the Supervisor network: other add-ons share it.
+    trusted_cidrs: ["172.30.32.2/32"]
+
+    # extra host names the web interface answers to [optional!]
+    #
+    # Besides the bridge ipaddress and its mDNS name
+    # (bifrost-<last 3 MAC bytes>.local), requests naming any other host
+    # are refused. This stops DNS rebinding attacks. Add the name here if
+    # you reach Bifrost under your own DNS name.
+    allowed_hosts: ["bifrost.home.lan"]
 
 # Bridge section
 #
@@ -212,11 +254,10 @@ Bifrost keeps the active configuration and an optional draft. A draft is
 saved to `config.draft.yaml` next to `config.yaml`, survives a restart, and
 takes effect only when you apply it.
 
-> **Note:** Until authentication lands, every endpoint below except
-> `GET /bifrost/config` answers `403 Forbidden`. A deny-all guard
-> (`require_admin`) covers the admin endpoints, because `/bifrost` accepts
-> unauthenticated requests from any origin. This guard is a stopgap: the
-> next wave replaces it with a real admin check.
+Every endpoint below requires the admin login; see "Admin login". `/bifrost`
+sends no CORS headers: only the Hue routes (`/api`, `/clip`, `/eventstream`,
+`/auth`, `/updater`, `/licenses`, `/description.xml`) stay open to every
+origin.
 
 | Endpoint | Purpose |
 |---|---|
@@ -268,3 +309,103 @@ Bifrost writes it into the page as `<base href>` and as
 `window.__BIFROST_BASE__`, both ending in `/`, so asset and API URLs resolve
 under the prefix. A header value that is not a plain absolute path is
 ignored, and the page uses `/`.
+
+## Admin login
+
+The Bifrost web interface and every endpoint under `/bifrost` require the
+admin password. The Hue API does not: Hue apps on your network need no
+password. Anyone on this network can control your lights and add Zigbee
+devices, so keep Bifrost on a trusted network.
+
+### First start
+
+Without a password, Bifrost prints a one-time setup code to standard output
+(not to the log) when it starts:
+
+```
+No admin password is set. Open Bifrost in a browser and enter this setup code to choose one: ABCD-EFGH-JKLM
+```
+
+With Docker, `docker logs` shows it. Enter the code and a password of at
+least eight characters in the web interface. Each start prints a new code.
+
+### Setup mode
+
+When the configuration file is missing or cannot be read, Bifrost does not
+exit. It starts in setup mode: the Hue bridge stays off, and only the admin
+login and a configuration draft are served, on port 80 of the address of the
+default network route. Choose another address with `--setup-listen
+<address:port>` or the `BIFROST_SETUP_LISTEN` environment variable. Bifrost
+prints a setup code to standard output, as on a first start:
+
+```
+Bifrost is in setup mode. Open http://10.0.0.12:80/ in a browser and enter this setup code: ABCD-EFGH-JKLM
+```
+
+Setup mode answers to its IP address only, not to a host name. Every
+endpoint except the login needs a session, and the first session needs the
+setup code and sets the admin password. Then:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /bifrost/setup/status` | The configuration file, why it could not be used, and whether `config.yaml.bak` exists. |
+| `POST /bifrost/setup/restore` | Load `config.yaml.bak` into the draft: `{"revision": n}`. |
+| `GET`/`PUT`/`PATCH`/`DELETE /bifrost/config/draft` | The draft, as on a running bridge; it may be incomplete. |
+| `GET`/`POST /bifrost/config/validate` | Findings for the draft, or for the posted document. |
+| `POST /bifrost/config/import` | Replace the draft from YAML. |
+| `POST /bifrost/config/apply` | Write the draft, with the new password, as the configuration file and start the bridge. |
+
+Applying keeps an unreadable file as `config.yaml.broken` and leaves
+`config.yaml.bak` alone. Bifrost then starts the bridge in the same process,
+and the session from setup mode stays logged in.
+
+### Lost password
+
+There is no reset by email or command-line flag. To reset the password:
+
+1. Stop Bifrost.
+2. Delete the `password_hash` line under `bifrost:` → `auth:` in
+   `config.yaml`.
+3. Start Bifrost again. It prints a new setup code, and every session ends.
+
+### Sessions
+
+A login starts a session held in the `bifrost_session` cookie (`HttpOnly`,
+`SameSite=Strict`, `Secure` over HTTPS). Sessions are kept in
+`sessions.yaml` beside `state.yaml`, readable by the owner only, so a
+restart does not log you out; the file holds a hash of each session token,
+never the token. A session works only from the address that logged in, and
+ends after `idle_minutes` without a request or `session_hours` after login.
+Logging in or changing the password starts a new session; changing the
+password ends every other one.
+
+Failed logins and setup codes from one address are slowed down: after three
+failures, each further one doubles the wait (up to 15 minutes) before that
+address may try again. Other addresses are never affected.
+
+### Request rules
+
+Every request under `/bifrost` passes these checks, in order:
+
+1. A request carrying `X-Ingress-Path` is refused with `403` unless it comes
+   from a `trusted_cidrs` address and `trust_ingress` is on. From a trusted
+   address it needs no login.
+2. The `Host` must be the bridge `ipaddress`, its mDNS name, or one of
+   `allowed_hosts`; otherwise `403`.
+3. Without a live session: `401`. Only `GET /bifrost/auth/session`,
+   `POST /bifrost/auth/login` and `POST /bifrost/auth/setup` answer without
+   one.
+4. Every request that changes something, and the `/bifrost/ws` websocket
+   upgrade, needs an `Origin` (or `Referer`) of this bridge: same host,
+   same port. Otherwise `403`.
+5. A changing request with a session needs the session's CSRF token, from
+   `GET /bifrost/auth/session`, in the `X-Bifrost-Csrf` header; otherwise
+   `403`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /bifrost/auth/session` | `{authenticated, setup_required, ingress, csrf}` for the current request. |
+| `POST /bifrost/auth/setup` | Set the first password: `{"setup_code": "...", "password": "..."}`. |
+| `POST /bifrost/auth/login` | `{"password": "..."}`; sets the session cookie. |
+| `POST /bifrost/auth/logout` | End this session, or every session with `{"all": true}`. |
+| `POST /bifrost/auth/password` | `{"current_password": "...", "new_password": "..."}`. |

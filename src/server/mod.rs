@@ -20,7 +20,7 @@ use axum::body::Body;
 use axum::extract::connect_info::IntoMakeServiceWithConnectInfo;
 use axum::extract::{ConnectInfo, Request};
 use axum::response::Response;
-use axum::{Router, ServiceExt};
+use axum::{Extension, Router, ServiceExt};
 
 use camino::Utf8PathBuf;
 use tokio::select;
@@ -76,12 +76,30 @@ fn trace_layer_on_response(response: &Response<Body>, latency: Duration, span: &
     span.record("status", tracing::field::display(response.status()));
 }
 
+/// CORS for the Hue routes, which Hue clients and web apps call from any
+/// origin. `/bifrost` is same-origin only and gets none.
+///
+/// Never add `allow_credentials` here: tower-http refuses it together with a
+/// wildcard origin, and allowing it would hand the admin session to every
+/// page the user visits.
+pub fn hue_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_methods(Any)
+        .allow_origin(AllowOrigin::any())
+        .allow_headers(Any)
+}
+
 fn router(protocol: Protocol, appstate: AppState) -> Router<()> {
-    routes::router(appstate).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(move |request: &Request| trace_layer_make_span_with(request, protocol))
-            .on_response(trace_layer_on_response),
-    )
+    routes::router(appstate, hue_cors_layer())
+        // handlers that set cookies need to know whether the request is TLS
+        .layer(Extension(protocol))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(move |request: &Request| {
+                    trace_layer_make_span_with(request, protocol)
+                })
+                .on_response(trace_layer_on_response),
+        )
 }
 
 #[must_use]
@@ -89,12 +107,7 @@ pub fn build_service(
     protocol: Protocol,
     appstate: AppState,
 ) -> IntoMakeServiceWithConnectInfo<NormalizePath<Router>, SocketAddr> {
-    let cors_layer = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_origin(AllowOrigin::any())
-        .allow_headers(Any);
-    let normalized = NormalizePathLayer::trim_trailing_slash()
-        .layer(router(protocol, appstate).layer(cors_layer));
+    let normalized = NormalizePathLayer::trim_trailing_slash().layer(router(protocol, appstate));
 
     ServiceExt::<Request>::into_make_service_with_connect_info(normalized)
 }

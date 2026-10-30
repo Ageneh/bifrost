@@ -8,6 +8,6 @@ services:
       BIFROST_CONFIG: /app/data/config.yaml
     volumes:
       # One directory holds everything Bifrost reads and writes: config.yaml,
-      # config.draft.yaml, config.yaml.bak, state.yaml and the certificate.
-      # Relative paths in config.yaml resolve against this directory.
+      # config.draft.yaml, config.yaml.bak, state.yaml, sessions.yaml and the
+      # certificate. Relative paths in config.yaml resolve against it.
       - ./data:/app/data

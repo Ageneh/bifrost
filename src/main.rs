@@ -1,12 +1,15 @@
 use std::io::Write;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use clap::Parser;
 
+use bifrost::auth;
 use bifrost::config::validate;
 use bifrost::config_store::ConfigStore;
 use bifrost::error::ApiResult;
+use bifrost::routes::bifrost::setup::{self, SetupOutcome};
 use bifrost::server;
 use bifrost::server::appstate::AppState;
 use bifrost::service_registry::{self, AppServiceFactory};
@@ -17,6 +20,7 @@ use tokio::signal::unix::SignalKind;
 
 const DEFAULT_CONFIG_FILE: &str = "config.yaml";
 const CONFIG_FILE_ENV: &str = "BIFROST_CONFIG";
+const SETUP_LISTEN_ENV: &str = "BIFROST_SETUP_LISTEN";
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -28,13 +32,34 @@ struct Args {
     /// Serve the web UI from this directory instead of the embedded copy
     #[arg(long)]
     ui_dir: Option<Utf8PathBuf>,
+
+    /// Address setup mode listens on while the configuration file is
+    /// missing or unreadable [default: `$BIFROST_SETUP_LISTEN`, or the
+    /// default route's interface on port 80]
+    #[arg(long)]
+    setup_listen: Option<SocketAddr>,
 }
 
 impl Args {
-    fn config_file(self) -> Utf8PathBuf {
+    fn config_file(&self) -> Utf8PathBuf {
         self.config
+            .clone()
             .or_else(|| std::env::var(CONFIG_FILE_ENV).ok().map(Utf8PathBuf::from))
             .unwrap_or_else(|| Utf8PathBuf::from(DEFAULT_CONFIG_FILE))
+    }
+
+    fn setup_listen(&self) -> std::io::Result<SocketAddr> {
+        if let Some(addr) = self.setup_listen {
+            return Ok(addr);
+        }
+        std::env::var(SETUP_LISTEN_ENV).map_or_else(
+            |_| setup::default_listen(),
+            |addr| {
+                addr.parse().map_err(|_| {
+                    std::io::Error::other(format!("{SETUP_LISTEN_ENV} is not an address"))
+                })
+            },
+        )
     }
 }
 
@@ -114,6 +139,33 @@ async fn build_tasks(appstate: &AppState) -> ApiResult<()> {
     Ok(())
 }
 
+/// Without an admin password, print a fresh setup code. A lost password is
+/// reset by deleting `bifrost.auth.password_hash` from the configuration
+/// file and restarting, which lands here again.
+fn announce_setup(appstate: &AppState) {
+    let config = appstate.config();
+    match &config.bifrost.auth.password_hash {
+        Some(hash) if !auth::is_valid_hash(hash) => log::error!(
+            "The admin password hash in the configuration cannot be read, so no login can succeed. \
+             To reset it, stop Bifrost, delete bifrost.auth.password_hash, and start Bifrost again."
+        ),
+        Some(_) => {}
+        None => {
+            let code = appstate.auth().issue_setup_code();
+            // stdout only, never the log: the code is the only control over
+            // who sets the first password, and log lines get collected and
+            // served elsewhere
+            println!(
+                "No admin password is set. Open Bifrost in a browser and enter this setup code to choose one: {code}"
+            );
+            let _ = std::io::stdout().flush();
+            log::warn!(
+                "No admin password is set; a one-time setup code was printed to standard output"
+            );
+        }
+    }
+}
+
 fn install_signal_handlers(appstate: &AppState) -> ApiResult<()> {
     async fn shutdown(msg: &str, mut mgr: SvmClient) {
         log::warn!("{msg}");
@@ -139,13 +191,24 @@ fn install_signal_handlers(appstate: &AppState) -> ApiResult<()> {
     Ok(())
 }
 
-async fn run(config_file: Utf8PathBuf) -> ApiResult<()> {
+async fn run(args: Args) -> ApiResult<()> {
     init_logging()?;
 
     #[cfg(feature = "server-banner")]
     server::banner::print()?;
 
-    let store = ConfigStore::load(&config_file)?;
+    let config_file = args.config_file();
+    let store = match ConfigStore::load(&config_file) {
+        Ok(store) => store,
+        Err(err) => {
+            // a missing or broken file is answered with setup mode, which
+            // writes a new one and then hands over to the bridge here
+            match setup::run(&config_file, err.to_string(), args.setup_listen()?).await? {
+                SetupOutcome::Configured => ConfigStore::load(&config_file)?,
+                SetupOutcome::Interrupted => return Ok(()),
+            }
+        }
+    };
     log::debug!("Configuration loaded successfully from {config_file}");
 
     // findings are reported, never enforced: a file that loads keeps loading
@@ -164,6 +227,8 @@ async fn run(config_file: Utf8PathBuf) -> ApiResult<()> {
 
     install_signal_handlers(&appstate)?;
 
+    announce_setup(&appstate);
+
     build_tasks(&appstate).await?;
 
     future.await??;
@@ -177,9 +242,8 @@ async fn main() {
     if let Some(dir) = args.ui_dir.clone() {
         bifrost::routes::ui::serve_from_directory(dir);
     }
-    let config_file = args.config_file();
 
-    if let Err(err) = run(config_file).await {
+    if let Err(err) = run(args).await {
         log::error!("Bifrost error: {err}");
         log::error!("Fatal error encountered, cannot continue.");
     }

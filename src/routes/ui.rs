@@ -257,9 +257,11 @@ pub async fn fallback(method: Method, uri: Uri, headers: HeaderMap) -> Response 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::net::SocketAddr;
     use std::sync::Arc;
 
     use axum::body::{Body, to_bytes};
+    use axum::extract::ConnectInfo;
     use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
     use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
     use axum::response::Response;
@@ -271,6 +273,7 @@ mod tests {
     use crate::config_store::ConfigStore;
     use crate::routes;
     use crate::server::appstate::AppState;
+    use crate::server::hue_cors_layer;
     use crate::testutil::{MINIMAL_CONFIG, TempDir};
 
     const INDEX: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"><script type="module" src="./_nuxt/entry.js"></script></head><body><div id="__nuxt"></div></body></html>"#;
@@ -556,12 +559,20 @@ mod tests {
         let store = ConfigStore::load(&dir.write("config.yaml", MINIMAL_CONFIG)).unwrap();
         let (svm, _future) = ServiceManager::spawn();
         let state = AppState::from_store(Arc::new(store), svm).await.unwrap();
-        let router = routes::router(state);
+        let router = routes::router(state, hue_cors_layer());
 
         let call = |path: &'static str| {
             let router = router.clone();
             async move {
-                let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+                // the real listener always supplies the peer, and /bifrost needs it
+                let mut request = Request::builder()
+                    .uri(path)
+                    .header("host", "10.12.0.20")
+                    .body(Body::empty())
+                    .unwrap();
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 50000))));
                 split(router.oneshot(request).await.unwrap()).await
             }
         };
@@ -577,7 +588,6 @@ mod tests {
             "/clip/v2/resource/light/x/y",
             "/api/x/y/z/w/v",
             "/eventstream/x",
-            "/bifrost/nothing/here",
             "/updater/x",
         ] {
             let (response, body) = call(path).await;
@@ -585,6 +595,12 @@ mod tests {
             assert!(!header(&response, &CONTENT_TYPE).contains("html"), "{path}");
             assert!(!body.contains('<'), "{path}: {body}");
         }
+
+        // the admin guard answers before any route lookup: no session, no shell
+        let (response, body) = call("/bifrost/nothing/here").await;
+        assert!(response.status().is_client_error(), "{}", response.status());
+        assert!(!header(&response, &CONTENT_TYPE).contains("html"));
+        assert!(!body.contains('<'), "{body}");
 
         // a single segment is a Hue v1 username: the bridge answers JSON, as before
         let (response, _) = call("/api/x").await;
