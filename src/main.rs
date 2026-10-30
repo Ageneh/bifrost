@@ -9,6 +9,7 @@ use bifrost::auth;
 use bifrost::config::validate;
 use bifrost::config_store::ConfigStore;
 use bifrost::error::ApiResult;
+use bifrost::logbuffer;
 use bifrost::routes::bifrost::setup::{self, SetupOutcome};
 use bifrost::server;
 use bifrost::server::appstate::AppState;
@@ -87,7 +88,7 @@ fn syslog_format(
     )
 }
 
-fn init_logging() -> ApiResult<()> {
+fn init_logging() -> ApiResult<Arc<logbuffer::LogBuffer>> {
     /* Try to provide reasonable default filters, when RUST_LOG is not specified */
     const DEFAULT_LOG_FILTERS: &[&str] = &[
         "debug",
@@ -101,16 +102,25 @@ fn init_logging() -> ApiResult<()> {
     let log_filters = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTERS.join(","));
 
     /* Detect if we need syslog or human-readable formatting */
-    if std::env::var("SYSTEMD_EXEC_PID").is_ok_and(|pid| pid == std::process::id().to_string()) {
-        Ok(pretty_env_logger::env_logger::builder()
+    let logger = if std::env::var("SYSTEMD_EXEC_PID")
+        .is_ok_and(|pid| pid == std::process::id().to_string())
+    {
+        pretty_env_logger::env_logger::builder()
             .format(syslog_format)
             .parse_filters(&log_filters)
-            .try_init()?)
+            .build()
     } else {
-        Ok(pretty_env_logger::formatted_timed_builder()
+        pretty_env_logger::formatted_timed_builder()
             .parse_filters(&log_filters)
-            .try_init()?)
-    }
+            .build()
+    };
+
+    /* keep every line for the log viewer, and pass it on to the console */
+    let max_level = logger.filter();
+    let buffer = logbuffer::install(Box::new(logger))?;
+    log::set_max_level(max_level);
+
+    Ok(buffer)
 }
 
 #[allow(clippy::similar_names)]

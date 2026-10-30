@@ -55,6 +55,7 @@ const KNOWN_ROUTES: &[&str] = &[
     "/bifrost/config",
     "/bifrost/config/draft",
     "/bifrost/config/apply",
+    "/bifrost/logs",
     "/bifrost/ws",
     "/bifrost/auth/session",
     "/bifrost/auth/login",
