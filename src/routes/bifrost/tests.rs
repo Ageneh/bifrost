@@ -47,7 +47,10 @@ const METHODS: &[Method] = &[
 const KNOWN_ROUTES: &[&str] = &[
     "/bifrost/service",
     "/bifrost/service/{id}",
-    "/bifrost/backend/z2m/{name}",
+    "/bifrost/bridge/certificate",
+    "/bifrost/bridge/certificate/regenerate",
+    "/bifrost/z2m",
+    "/bifrost/z2m/{name}",
     "/bifrost/config",
     "/bifrost/config/draft",
     "/bifrost/config/apply",
@@ -364,7 +367,7 @@ async fn cors_covers_hue_routes_only() {
     for uri in [
         "/bifrost/config",
         "/bifrost/service/00000000-0000-0000-0000-000000000000",
-        "/bifrost/backend/z2m/x",
+        "/bifrost/z2m/x",
     ] {
         assert!(!preflight_allows(&fixture, uri).await, "{uri}");
     }

@@ -19,6 +19,11 @@
 //! sent with [`MockZ2m::received`], and waits for one message with
 //! [`MockZ2m::wait_for`].
 
+// every test binary compiles its own copy of this module, and each uses a
+// different part of the handle
+#![allow(dead_code)]
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8Path;
@@ -40,6 +45,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 struct Shared {
     greeting: Vec<String>,
     received: Mutex<Vec<RawMessage>>,
+    connections: AtomicUsize,
     outbound: broadcast::Sender<String>,
     changed: Notify,
 }
@@ -73,6 +79,7 @@ impl MockZ2m {
                 .map(serde_json::to_string)
                 .collect::<serde_json::Result<Vec<_>>>()?,
             received: Mutex::new(vec![]),
+            connections: AtomicUsize::new(0),
             outbound,
             changed: Notify::new(),
         });
@@ -103,6 +110,13 @@ impl MockZ2m {
         let message = json!({"topic": topic, "payload": payload});
         // a send error only means no client is connected right now
         let _ = self.shared.outbound.send(message.to_string());
+    }
+
+    /// How many clients have connected since the mock started; a backend
+    /// that is restarted connects again.
+    #[must_use]
+    pub fn connections(&self) -> usize {
+        self.shared.connections.load(Ordering::SeqCst)
     }
 
     /// Everything clients have sent so far, in arrival order.
@@ -198,6 +212,7 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
 
 async fn serve(stream: TcpStream, shared: Arc<Shared>) -> Result<()> {
     let mut socket = tokio_tungstenite::accept_async(stream).await?;
+    shared.connections.fetch_add(1, Ordering::SeqCst);
     let mut outbound = shared.outbound.subscribe();
 
     for message in &shared.greeting {

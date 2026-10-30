@@ -2,8 +2,10 @@
 
 pub mod auth;
 pub mod certificate;
+pub mod z2m;
 
 pub use certificate::CertificateInfo;
+pub use z2m::{Z2mServerEntry, Z2mServerList, Z2mServerWrite};
 
 use serde::{Deserialize, Serialize};
 

@@ -97,7 +97,7 @@ impl IntoResponse for ConfigApiError {
     }
 }
 
-type ConfigApiResult<T> = Result<T, ConfigApiError>;
+pub(crate) type ConfigApiResult<T> = Result<T, ConfigApiError>;
 
 fn draft_response(revision: u64, draft: Option<&Draft>) -> ConfigApiResult<DraftResponse> {
     let Some(draft) = draft else {
@@ -170,13 +170,27 @@ async fn put_draft(
     Ok(Json(write_draft(&state, req.revision, req.config)?))
 }
 
-async fn patch_draft(
+/// Apply `patch` (RFC 7386) to the draft, or to the active configuration
+/// when there is none, and store the result as the draft.
+///
+/// This is what the typed endpoints (the z2m server list, for one) write
+/// through, so they inherit the revision check, the secret handling and the
+/// validation of a hand-written patch.
+pub(crate) fn patch_draft(
+    state: &AppState,
+    revision: u64,
+    patch: &Value,
+) -> ConfigApiResult<DraftResponse> {
+    let mut document = serde_json::to_value(base_config(state))?;
+    merge_patch(&mut document, patch);
+    write_draft(state, revision, document)
+}
+
+async fn patch_draft_handler(
     State(state): State<AppState>,
     Json(req): Json<DraftPatch>,
 ) -> ConfigApiResult<Json<DraftResponse>> {
-    let mut document = serde_json::to_value(base_config(&state))?;
-    merge_patch(&mut document, &req.patch);
-    Ok(Json(write_draft(&state, req.revision, document)?))
+    Ok(Json(patch_draft(&state, req.revision, &req.patch)?))
 }
 
 async fn delete_draft(
@@ -302,7 +316,7 @@ pub fn admin_router(hook: ApplyHook) -> Router<AppState> {
             "/draft",
             get(get_draft)
                 .put(put_draft)
-                .patch(patch_draft)
+                .patch(patch_draft_handler)
                 .delete(delete_draft),
         )
         .route("/diff", get(get_diff))

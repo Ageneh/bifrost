@@ -806,7 +806,7 @@ mod tests {
             "/bifrost/config/export",
             "/bifrost/config/restart",
             "/bifrost/service",
-            "/bifrost/backend/z2m/x",
+            "/bifrost/z2m/x",
             "/bifrost/ws",
             "/bifrost/logs",
             "/bifrost/auth/password",

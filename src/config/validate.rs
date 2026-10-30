@@ -102,6 +102,15 @@ fn check_z2m_servers(config: &AppConfig, errors: &mut Vec<ValidationError>) {
     }
 
     for (name, server) in &config.z2m.servers {
+        // the backend for a server is the service `z2m@<name>`, so the name
+        // has to survive that as one instance name
+        if name.is_empty() || name.contains('@') {
+            errors.push(ValidationError::error(
+                format!("z2m.{name}"),
+                "a z2m server name must not be empty or contain '@'",
+            ));
+        }
+
         let path = format!("z2m.{name}.url");
         let url = &server.url;
 

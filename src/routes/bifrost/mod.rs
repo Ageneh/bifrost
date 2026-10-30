@@ -1,10 +1,10 @@
 pub mod auth;
-pub mod backend;
 pub mod certificate;
 pub mod config;
 pub mod service;
 pub mod setup;
 pub mod websocket;
+pub mod z2m;
 
 #[cfg(test)]
 pub mod tests;
@@ -316,8 +316,8 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .nest("/auth", auth::router())
         .nest("/service", service::router())
-        .nest("/backend", backend::router())
         .nest("/bridge/certificate", certificate::router())
+        .nest("/z2m", z2m::router())
         .nest("/config", config::router())
         .route("/ws", any(websocket))
         .fallback(not_found)
