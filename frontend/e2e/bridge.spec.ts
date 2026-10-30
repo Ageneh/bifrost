@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+import type { Page } from '@playwright/test'
+
 // every spec shares one fixture server, so each test starts from the same
 // draft instead of whatever the previous one left behind
 test.beforeEach(async ({ request }) => {
   await request.post('__reset')
 })
-import type { Page } from '@playwright/test'
 
 /**
  * Wave 3's System · Bridge and network screen.

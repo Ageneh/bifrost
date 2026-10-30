@@ -4,11 +4,16 @@
  * and decides between the setup panel, the sign-in panel and the shell.
  */
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useApi } from '~/composables/useApi'
 import { useStatusPanel } from '~/composables/useStatusPanel'
 
 const { client, ready, authenticated, setupRequired } = useApi()
 const { component: statusComponent, panelProps: statusProps } = useStatusPanel()
+const route = useRoute()
+
+/** The wizard is due while the bridge has no identity or no z2m server. */
+const wizardDue = ref(false)
 
 /**
  * The name the running bridge reports. It is read from the active
@@ -18,11 +23,46 @@ const { component: statusComponent, panelProps: statusProps } = useStatusPanel()
 const activeName = ref<string | null>(null)
 const bridgeName = computed(() => activeName.value ?? 'Bifrost')
 
+/**
+ * Go to the wizard by changing only the hash.
+ *
+ * A router push resolves against the router's base, which drops the ingress
+ * prefix the page was served under; the hash never does.
+ */
+function openWizard(): void {
+  if (globalThis.location !== undefined) {
+    globalThis.location.hash = '#/setup'
+  }
+}
+
+/**
+ * Whether the wizard still has work to do.
+ *
+ * A bridge with an identity and one z2m server never sees it again. In setup
+ * mode there is no configuration at all, so the read fails and the answer is
+ * yes.
+ */
+async function wizardPending(): Promise<boolean> {
+  try {
+    const config = (await client.activeConfig()) as {
+      bridge?: { mac?: unknown }
+      z2m?: Record<string, unknown>
+    }
+    const identity = typeof config.bridge?.mac === 'string' && config.bridge.mac !== ''
+    const servers = Object.keys(config.z2m ?? {}).length > 0
+    return !(identity && servers)
+  }
+  catch {
+    return true
+  }
+}
+
 watch(
   authenticated,
   async (signedIn) => {
     if (!signedIn) {
       activeName.value = null
+      wizardDue.value = false
       return
     }
     try {
@@ -34,8 +74,31 @@ watch(
     catch {
       // the shell still renders; Home reports the read failure itself
     }
+
+    wizardDue.value = await wizardPending()
+    if (wizardDue.value && route.path !== '/setup') {
+      openWizard()
+    }
   },
   { immediate: true },
+)
+
+// the wizard finishes by applying a configuration, so the answer changes
+// without the session changing
+watch(
+  () => route.path,
+  async (path) => {
+    if (!authenticated.value) {
+      return
+    }
+    if (path === '/setup') {
+      return
+    }
+    wizardDue.value = await wizardPending()
+    if (wizardDue.value) {
+      openWizard()
+    }
+  },
 )
 </script>
 

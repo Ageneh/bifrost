@@ -20,12 +20,16 @@ import type { PasswordChange } from './generated/PasswordChange'
 import type { PermitJoinRequest } from './generated/PermitJoinRequest'
 import type { PermitJoinResponse } from './generated/PermitJoinResponse'
 import type { RestartRequest } from './generated/RestartRequest'
+import type { DiscoveryRequest } from './generated/DiscoveryRequest'
+import type { DiscoveryResult } from './generated/DiscoveryResult'
 import type { RevisionRequest } from './generated/RevisionRequest'
 import type { RoomList } from './generated/RoomList'
 import type { ServiceList } from './generated/ServiceList'
 import type { ServiceState } from './generated/ServiceState'
 import type { SessionResponse } from './generated/SessionResponse'
 import type { SetupRequest } from './generated/SetupRequest'
+import type { WizardProgress } from './generated/WizardProgress'
+import type { WizardWrite } from './generated/WizardWrite'
 import type { ValidationError } from './generated/ValidationError'
 
 /** Header every mutating request with a session must carry. */
@@ -249,6 +253,22 @@ export class ApiClient {
   /** Seconds left in a server's join window; zero when none is open. */
   permitJoinStatus(server: string): Promise<PermitJoinResponse> {
     return this.request(`z2m/${encodeURIComponent(server)}/permit_join`)
+  }
+
+  // ---- first run -------------------------------------------------------
+
+  /** Where the first-run wizard left off. */
+  wizard(): Promise<WizardProgress> {
+    return this.request('setup/wizard')
+  }
+
+  saveWizard(body: WizardWrite): Promise<WizardProgress> {
+    return this.request('setup/wizard', { method: 'PUT', body, csrf: true })
+  }
+
+  /** Ask a z2m server what it can see, before there is a bridge to ask. */
+  discovery(body: DiscoveryRequest): Promise<DiscoveryResult> {
+    return this.request('setup/discovery', { method: 'POST', body, csrf: true })
   }
 
   // ---- rooms -----------------------------------------------------------

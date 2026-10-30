@@ -115,6 +115,11 @@ pub enum ApiError {
     #[error(transparent)]
     NativeTlsError(#[from] native_tls::Error),
 
+    /// Something a person has to read: a server that cannot be reached, a
+    /// list that never arrived.
+    #[error("{0}")]
+    Other(String),
+
     #[error("Service error: {0}")]
     SvcError(String),
 

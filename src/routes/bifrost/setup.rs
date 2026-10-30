@@ -28,8 +28,8 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use bifrost_api::admin::{
-    ApplyResponse, ConfigImport, DraftPatch, DraftResponse, DraftWrite, ErrorResponse,
-    RevisionRequest, SetupStatus,
+    ApplyResponse, ConfigImport, DiscoveryRequest, DiscoveryResult, DraftPatch, DraftResponse,
+    DraftWrite, ErrorResponse, RevisionRequest, SetupStatus, WizardProgress, WizardWrite,
 };
 
 use crate::auth::{Auth, HashCost, SystemClock};
@@ -294,6 +294,79 @@ fn current_document(state: &SetupState) -> Value {
     )
 }
 
+/// The wizard's own record, kept beside the configuration draft.
+///
+/// The wizard must not write the draft until review: a draft left behind by
+/// setup would read as unapplied edits, and discarding a draft would throw
+/// setup away. This file is what makes "setup in progress" a different thing
+/// from "there are changes waiting".
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct WizardRecord {
+    pub(crate) step: String,
+    pub(crate) values: Value,
+    pub(crate) updated_at: DateTime<Utc>,
+}
+
+pub(crate) fn read_wizard(path: &Utf8Path) -> Option<WizardRecord> {
+    let text = fs::read_to_string(path).ok()?;
+    serde_yml::from_str(&text)
+        .inspect_err(|err| log::warn!("Ignoring unreadable wizard record {path}: {err}"))
+        .ok()
+}
+
+/// Write the wizard's progress; the file is private like the draft.
+pub(crate) fn write_wizard(
+    path: &Utf8Path,
+    step: String,
+    values: Value,
+) -> Result<WizardRecord, SetupApiError> {
+    let record = WizardRecord {
+        step,
+        values,
+        updated_at: Utc::now(),
+    };
+    write_atomic(path, serde_yml::to_string(&record)?.as_bytes())?;
+    Ok(record)
+}
+
+pub(crate) fn wizard_progress(record: Option<WizardRecord>) -> WizardProgress {
+    record.map_or_else(
+        || WizardProgress {
+            step: "identity".to_string(),
+            values: Value::Object(serde_json::Map::new()),
+            updated_at: None,
+        },
+        |record| WizardProgress {
+            step: record.step,
+            values: record.values,
+            updated_at: Some(record.updated_at.to_rfc3339()),
+        },
+    )
+}
+
+async fn get_wizard(State(state): State<SetupState>) -> Json<WizardProgress> {
+    Json(wizard_progress(read_wizard(&state.0.paths.wizard)))
+}
+
+async fn put_wizard(
+    State(state): State<SetupState>,
+    Json(req): Json<WizardWrite>,
+) -> SetupApiResult<Json<WizardProgress>> {
+    let record = write_wizard(&state.0.paths.wizard, req.step, req.values)?;
+    Ok(Json(wizard_progress(Some(record))))
+}
+
+/// Ask a z2m server what it can see, before there is a bridge to ask.
+async fn post_discovery(
+    Json(req): Json<DiscoveryRequest>,
+) -> SetupApiResult<Json<DiscoveryResult>> {
+    let (devices, rooms) = crate::backend::z2m::discover::devices(&req.server)
+        .await
+        .map_err(|err| SetupApiError::Internal(err.to_string()))?;
+
+    Ok(Json(DiscoveryResult { devices, rooms }))
+}
+
 async fn get_status(State(state): State<SetupState>) -> Json<SetupStatus> {
     Json(SetupStatus {
         config_file: state.0.paths.config.to_string(),
@@ -470,6 +543,8 @@ pub fn router(state: SetupState) -> Router<()> {
     let bifrost = Router::new()
         .nest("/auth", auth::session_router())
         .route("/setup/status", get(get_status))
+        .route("/setup/wizard", get(get_wizard).put(put_wizard))
+        .route("/setup/discovery", post(post_discovery))
         .route("/setup/restore", post(post_restore))
         .route(
             "/config/draft",

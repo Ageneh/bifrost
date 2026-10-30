@@ -14,10 +14,11 @@ use bifrost_api::admin::auth::{
     LoginRequest, LogoutRequest, PasswordChange, SessionResponse, SetupRequest,
 };
 use bifrost_api::admin::{
-    ApplyAction, ApplyFailure, ApplyPlan, ApplyResponse, ConfigChange, ConfigImport, DraftPatch,
-    DraftResponse, DraftWrite, ErrorResponse, Reason, RestartRequest, RevisionRequest,
-    RevisionResponse, RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest, SetupStatus,
-    Severity, ValidationError,
+    ApplyAction, ApplyFailure, ApplyPlan, ApplyResponse, ConfigChange, ConfigImport,
+    DiscoveredDevice, DiscoveredRoom, DiscoveryRequest, DiscoveryResult, DraftPatch, DraftResponse,
+    DraftWrite, ErrorResponse, Reason, RestartRequest, RevisionRequest, RevisionResponse,
+    RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest, SetupStatus, Severity,
+    ValidationError, WizardProgress, WizardWrite,
 };
 use bifrost_api::config::{
     AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, RoomConfig, Z2mServer,
@@ -88,6 +89,12 @@ fn export_typescript_bindings() {
     RoomDevice::export_all(&cfg).unwrap();
     RoomScene::export_all(&cfg).unwrap();
     SceneRecallRequest::export_all(&cfg).unwrap();
+    WizardProgress::export_all(&cfg).unwrap();
+    WizardWrite::export_all(&cfg).unwrap();
+    DiscoveryRequest::export_all(&cfg).unwrap();
+    DiscoveryResult::export_all(&cfg).unwrap();
+    DiscoveredDevice::export_all(&cfg).unwrap();
+    DiscoveredRoom::export_all(&cfg).unwrap();
     ErrorResponse::export_all(&cfg).unwrap();
     SetupStatus::export_all(&cfg).unwrap();
 

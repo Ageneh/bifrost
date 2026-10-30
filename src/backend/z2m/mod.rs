@@ -1,6 +1,7 @@
 mod backend_event;
 mod bridge_event;
 mod bridge_import;
+pub mod discover;
 pub mod entertainment;
 pub mod learn;
 pub mod websocket;
