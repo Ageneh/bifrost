@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * Wave 8's entertainment recipes, behind the ingress prefix at 390 px.
+ * Wave 8's entertainment recipes and diagnostics, behind the ingress prefix
+ * at 390 px.
  *
- * The wizard's entertainment step is in wizard.spec.ts; the canvas, the
- * channel table and the diagnostics panel arrive with their own commits.
+ * The wizard's entertainment step is in wizard.spec.ts; the canvas and the
+ * channel table arrive with their own commit.
  */
 const ZONE_TV = '2f1c4f1e-0000-4000-8000-000000000001'
 const ZONE_DESK = '2f1c4f1e-0000-4000-8000-000000000002'
@@ -65,5 +66,20 @@ test.describe('entertainment', () => {
     await expect(overlap).toContainText('TV left')
     await expect(overlap).toContainText('Living room TV')
     await expect(page.getByTestId('entertainment-wizard-create')).toBeDisabled()
+  })
+
+  test('the diagnostics panel says why a stream ended', async ({ page }) => {
+    await page.goto('#/entertainment')
+
+    await expect(page.getByTestId('diagnostics-table')).toBeVisible()
+    await expect(page.getByTestId(`diagnostics-row-${ZONE_TV}`)).toContainText('50')
+    await expect(page.getByTestId(`diagnostics-error-${ZONE_DESK}`)).toContainText(
+      'Timeout while waiting for sync data',
+    )
+
+    // the status column stops one stream and leaves the other
+    await page.getByTestId(`entertainment-streams-stop-${ZONE_TV}`).click()
+    await expect(page.getByTestId(`diagnostics-row-${ZONE_TV}`)).toHaveCount(0)
+    await expect(page.getByTestId(`diagnostics-row-${ZONE_DESK}`)).toBeVisible()
   })
 })

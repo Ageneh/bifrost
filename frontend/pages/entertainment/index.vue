@@ -4,17 +4,22 @@
  *
  * The preflight is above the recipes rather than inside them, because it is
  * about the bridge and not about a recipe: when it is red, every recipe is
- * blocked for the same reason.
+ * blocked for the same reason. The status column is the other half: what is
+ * streaming right now, and why one is not.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AsyncState from '~/components/AsyncState.vue'
+import DiagnosticsPanel from '~/components/DiagnosticsPanel.vue'
 import EntertainmentWizard from '~/components/EntertainmentWizard.vue'
 import PreflightChecklist from '~/components/PreflightChecklist.vue'
 import RecipeCard from '~/components/RecipeCard.vue'
+import StreamStatusCard from '~/components/StreamStatusCard.vue'
 import { useEntertainment } from '~/composables/useEntertainment'
+import { useStreams } from '~/composables/useStreams'
 import { useToast } from '~/composables/useToast'
 
 const entertainment = useEntertainment()
+const streams = useStreams()
 const toast = useToast()
 
 /** The recipe the wizard is carrying out, or none. */
@@ -73,6 +78,14 @@ const available = computed(
   () => entertainment.ready.value && entertainment.devices.value.length > 0,
 )
 
+/** The name of the zone a stream belongs to. */
+function areaName(area: string): string {
+  const zone = entertainment.zones.value.find(entry => entry.id === area)
+  return zone?.name ?? 'An unknown area'
+}
+
+const maxStreams = computed(() => entertainment.capabilities.value?.max_streams ?? 0)
+
 function start(key: string): void {
   recipe.value = RECIPES.find(entry => entry.key === key) ?? null
 }
@@ -85,8 +98,23 @@ async function created(id: string): Promise<void> {
   await navigateTo(`/entertainment/${id}`)
 }
 
+async function stop(area: string): Promise<void> {
+  try {
+    await streams.stopStream(area)
+    toast.ok('Stream stopped.')
+  }
+  catch (error) {
+    toast.fail(error instanceof Error ? error.message : 'The stream did not stop.')
+  }
+}
+
 onMounted(async () => {
+  streams.start()
   await entertainment.load()
+})
+
+onBeforeUnmount(() => {
+  streams.stop()
 })
 </script>
 
@@ -218,7 +246,24 @@ onMounted(async () => {
               </NuxtLink>
             </div>
           </section>
+
+          <DiagnosticsPanel
+            :streams="streams.streams()"
+            :name-of="areaName"
+            testid="entertainment-diagnostics"
+          />
         </div>
+
+        <aside class="fd-stack column-side">
+          <StreamStatusCard
+            :streams="streams.streams()"
+            :name-of="areaName"
+            :max-streams="maxStreams"
+            :failure="streams.failure.value"
+            testid="entertainment-streams"
+            @stop="stop"
+          />
+        </aside>
       </div>
     </AsyncState>
 
@@ -242,13 +287,25 @@ onMounted(async () => {
 }
 .columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: var(--fd-3);
   align-items: start;
+}
+.column-side {
+  position: sticky;
+  top: var(--fd-3);
 }
 .recipes {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--fd-3);
+}
+@media (max-width: 900px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .column-side {
+    position: static;
+  }
 }
 </style>
