@@ -1,3 +1,5 @@
+pub mod diff;
+pub mod redact;
 pub mod validate;
 
 use camino::Utf8Path;

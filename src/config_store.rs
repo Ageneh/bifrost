@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::config::diff::{self, ApplyPlan, ConfigChange};
 use crate::config::validate::{self, ValidationError};
 use crate::config::{self, AppConfig};
 
@@ -99,6 +100,9 @@ pub struct ApplyOutcome {
     pub revision: u64,
     pub previous: AppConfig,
     pub applied: AppConfig,
+    pub plan: ApplyPlan,
+    /// Applied changes, with secrets redacted.
+    pub changes: Vec<ConfigChange>,
 }
 
 pub struct ConfigStore {
@@ -275,6 +279,8 @@ impl ConfigStore {
 
         Ok(ApplyOutcome {
             revision: self.next_revision(),
+            plan: diff::plan(&previous, &applied),
+            changes: diff::diff(&previous, &applied),
             previous,
             applied,
         })
@@ -352,6 +358,7 @@ mod tests {
 
     use camino::Utf8Path;
 
+    use crate::config::diff::ApplyAction;
     use crate::config_store::{
         ConfigPaths, ConfigStore, ConfigStoreError, write_atomic, write_atomic_with,
     };
@@ -463,6 +470,13 @@ mod tests {
         assert_eq!(outcome.revision, 2);
         assert_eq!(outcome.previous.bridge.name, "Bifrost");
         assert_eq!(outcome.applied.bridge.name, "Applied");
+        assert_eq!(outcome.changes.len(), 1);
+        assert_eq!(
+            outcome.plan.hot,
+            [ApplyAction::Update {
+                path: "bridge.name".into()
+            }]
+        );
         assert_eq!(store.active().bridge.name, "Applied");
         assert!(store.draft().is_none());
         assert!(!store.paths().draft.exists());

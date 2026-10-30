@@ -88,9 +88,10 @@ impl Z2mServer {
         url
     }
 
+    /// Replace a non-default `token=` value in `url` with a placeholder.
     #[must_use]
     #[allow(clippy::option_if_let_else)]
-    fn sanitize_url(url: &str) -> String {
+    pub fn sanitize_url(url: &str) -> String {
         match url.find("token=") {
             Some(offset) => {
                 let token = &url[offset + "token=".len()..];
