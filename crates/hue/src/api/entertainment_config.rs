@@ -66,7 +66,7 @@ pub struct EntertainmentConfigurationChannels {
     pub members: Vec<EntertainmentConfigurationStreamMembers>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
@@ -93,7 +93,7 @@ pub enum EntertainmentConfigurationAction {
     Stop,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntertainmentConfigurationType {
     Screen,
