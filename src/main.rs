@@ -4,6 +4,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use clap::Parser;
 
+use bifrost::auth;
 use bifrost::config::validate;
 use bifrost::config_store::ConfigStore;
 use bifrost::error::ApiResult;
@@ -110,6 +111,33 @@ async fn build_tasks(appstate: &AppState) -> ApiResult<()> {
     Ok(())
 }
 
+/// Without an admin password, print a fresh setup code. A lost password is
+/// reset by deleting `bifrost.auth.password_hash` from the configuration
+/// file and restarting, which lands here again.
+fn announce_setup(appstate: &AppState) {
+    let config = appstate.config();
+    match &config.bifrost.auth.password_hash {
+        Some(hash) if !auth::is_valid_hash(hash) => log::error!(
+            "The admin password hash in the configuration cannot be read, so no login can succeed. \
+             To reset it, stop Bifrost, delete bifrost.auth.password_hash, and start Bifrost again."
+        ),
+        Some(_) => {}
+        None => {
+            let code = appstate.auth().issue_setup_code();
+            // stdout only, never the log: the code is the only control over
+            // who sets the first password, and log lines get collected and
+            // served elsewhere
+            println!(
+                "No admin password is set. Open Bifrost in a browser and enter this setup code to choose one: {code}"
+            );
+            let _ = std::io::stdout().flush();
+            log::warn!(
+                "No admin password is set; a one-time setup code was printed to standard output"
+            );
+        }
+    }
+}
+
 fn install_signal_handlers(appstate: &AppState) -> ApiResult<()> {
     async fn shutdown(msg: &str, mut mgr: SvmClient) {
         log::warn!("{msg}");
@@ -159,6 +187,8 @@ async fn run(config_file: Utf8PathBuf) -> ApiResult<()> {
     let appstate = AppState::from_store(Arc::new(store), client).await?;
 
     install_signal_handlers(&appstate)?;
+
+    announce_setup(&appstate);
 
     build_tasks(&appstate).await?;
 

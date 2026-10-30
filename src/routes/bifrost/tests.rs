@@ -44,6 +44,9 @@ const KNOWN_ROUTES: &[&str] = &[
     "/bifrost/config/draft",
     "/bifrost/config/apply",
     "/bifrost/ws",
+    "/bifrost/auth/session",
+    "/bifrost/auth/login",
+    "/bifrost/auth/password",
 ];
 
 struct Fixture {

@@ -28,6 +28,24 @@ bifrost:
   # (this might require pairing the Hue App again)
   cert_file: "cert.pem"
 
+  # Admin login for the Bifrost web interface and the /bifrost API
+  # [optional!]
+  #
+  # This section cannot be changed through the configuration draft. Bifrost
+  # writes password_hash itself; see "Admin login" below.
+  auth:
+    # hash of the admin password, written by Bifrost
+    #
+    # To reset a lost password: stop Bifrost, delete this line, and start
+    # Bifrost again. It prints a new setup code, and every session ends.
+    password_hash: "$scrypt$..."
+
+    # a session ends this many hours after login, however active
+    session_hours: 12
+
+    # a session ends after this many minutes without a request
+    idle_minutes: 60
+
 # Bridge section
 #
 # Settings for hue bridge emulation
@@ -237,3 +255,54 @@ only after a restart.
 Secrets (z2m tokens, password hashes) are write-only. Reads show
 `<<REDACTED>>` for a secret that is set. On write, an absent, `null` or
 `<<REDACTED>>` secret keeps the existing value, and `""` clears it.
+
+## Admin login
+
+The Bifrost web interface and every endpoint under `/bifrost` require the
+admin password. The Hue API does not: Hue apps on your network need no
+password. Anyone on this network can control your lights and add Zigbee
+devices, so keep Bifrost on a trusted network.
+
+### First start
+
+Without a password, Bifrost prints a one-time setup code to standard output
+(not to the log) when it starts:
+
+```
+No admin password is set. Open Bifrost in a browser and enter this setup code to choose one: ABCD-EFGH-JKLM
+```
+
+With Docker, `docker logs` shows it. Enter the code and a password of at
+least eight characters in the web interface. Each start prints a new code.
+
+### Lost password
+
+There is no reset by email or command-line flag. To reset the password:
+
+1. Stop Bifrost.
+2. Delete the `password_hash` line under `bifrost:` → `auth:` in
+   `config.yaml`.
+3. Start Bifrost again. It prints a new setup code, and every session ends.
+
+### Sessions
+
+A login starts a session held in the `bifrost_session` cookie (`HttpOnly`,
+`SameSite=Strict`, `Secure` over HTTPS). Sessions are kept in
+`sessions.yaml` beside `state.yaml`, readable by the owner only, so a
+restart does not log you out; the file holds a hash of each session token,
+never the token. A session works only from the address that logged in, and
+ends after `idle_minutes` without a request or `session_hours` after login.
+Logging in or changing the password starts a new session; changing the
+password ends every other one.
+
+Failed logins and setup codes from one address are slowed down: after three
+failures, each further one doubles the wait (up to 15 minutes) before that
+address may try again. Other addresses are never affected.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /bifrost/auth/session` | `{authenticated, setup_required, ingress, csrf}` for the current request. |
+| `POST /bifrost/auth/setup` | Set the first password: `{"setup_code": "...", "password": "..."}`. |
+| `POST /bifrost/auth/login` | `{"password": "..."}`; sets the session cookie. |
+| `POST /bifrost/auth/logout` | End this session, or every session with `{"all": true}`. |
+| `POST /bifrost/auth/password` | `{"current_password": "...", "new_password": "..."}`. |

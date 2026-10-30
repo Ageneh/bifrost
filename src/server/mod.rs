@@ -20,7 +20,7 @@ use axum::body::Body;
 use axum::extract::connect_info::IntoMakeServiceWithConnectInfo;
 use axum::extract::{ConnectInfo, Request};
 use axum::response::Response;
-use axum::{Router, ServiceExt};
+use axum::{Extension, Router, ServiceExt};
 
 use camino::Utf8PathBuf;
 use tokio::select;
@@ -90,11 +90,16 @@ pub fn hue_cors_layer() -> CorsLayer {
 }
 
 fn router(protocol: Protocol, appstate: AppState) -> Router<()> {
-    routes::router(appstate, hue_cors_layer()).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(move |request: &Request| trace_layer_make_span_with(request, protocol))
-            .on_response(trace_layer_on_response),
-    )
+    routes::router(appstate, hue_cors_layer())
+        // handlers that set cookies need to know whether the request is TLS
+        .layer(Extension(protocol))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(move |request: &Request| {
+                    trace_layer_make_span_with(request, protocol)
+                })
+                .on_response(trace_layer_on_response),
+        )
 }
 
 #[must_use]

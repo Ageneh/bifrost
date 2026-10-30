@@ -36,6 +36,10 @@ const RESTART_GRACE: Duration = Duration::from_millis(500);
 
 const YAML_CONTENT_TYPE: &str = "application/yaml";
 
+/// The authentication settings, which the draft cannot change.
+const AUTH_PATH: &str = "bifrost.auth";
+const AUTH_POINTER: &str = "/bifrost/auth";
+
 /// Brings running services in line with an applied configuration.
 pub type ApplyHook =
     Arc<dyn Fn(AppState, Vec<ApplyAction>) -> BoxFuture<'static, ApiResult<()>> + Send + Sync>;
@@ -135,6 +139,18 @@ fn write_draft(
         validate::validate_value(&document).map_err(ConfigApiError::Invalid)?;
 
     let store = state.store();
+
+    // a document without the section keeps the active settings; one that
+    // names different settings is refused rather than silently dropped
+    if document.pointer(AUTH_POINTER).is_some()
+        && config.bifrost.auth != store.active().bifrost.auth
+    {
+        return Err(ConfigApiError::Invalid(vec![ValidationError::error(
+            AUTH_PATH,
+            "Authentication settings cannot be changed through the draft; use /bifrost/auth",
+        )]));
+    }
+
     let draft = store.set_draft(revision, config)?;
     draft_response(store.revision(), Some(&draft))
 }
@@ -683,6 +699,63 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["revision"], 2);
         assert_eq!(fixture.state.config().bridge.name, "After restart");
+    }
+
+    #[tokio::test]
+    async fn draft_refuses_auth_changes_and_keeps_auth_on_round_trip() {
+        let fixture = Fixture::new().await;
+        fixture
+            .state
+            .store()
+            .update_auth(|auth| {
+                auth.password_hash = Some("$scrypt$owner-hash".into());
+                true
+            })
+            .unwrap();
+
+        // the redacted document round-trips with the hash intact
+        let (_, active) = call(
+            &router().with_state(fixture.state.clone()),
+            Method::GET,
+            "/",
+            None,
+        )
+        .await;
+        assert_eq!(active["bifrost"]["auth"]["password_hash"], REDACTED);
+        let (status, _) = fixture.put_draft(0, active.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // a document without the section keeps the active settings
+        let mut without = active.clone();
+        without["bifrost"].as_object_mut().unwrap().remove("auth");
+        let (status, _) = fixture.put_draft(1, without).await;
+        assert_eq!(status, StatusCode::OK);
+
+        for patch in [
+            json!({"bifrost": {"auth": {"trusted_cidrs": ["0.0.0.0/0"]}}}),
+            json!({"bifrost": {"auth": {"password_hash": "$scrypt$attacker"}}}),
+            json!({"bifrost": {"auth": {"password_hash": ""}}}),
+            json!({"bifrost": {"auth": {"trust_ingress": false}}}),
+        ] {
+            let (status, body) = fixture
+                .call(
+                    Method::PATCH,
+                    "/draft",
+                    Some(json!({"revision": 2, "patch": patch})),
+                )
+                .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{patch}");
+            assert_eq!(body["errors"][0]["path"], "bifrost.auth", "{patch}");
+        }
+
+        let (status, _) = fixture
+            .call(Method::POST, "/apply", Some(json!({"revision": 2})))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            fixture.state.config().bifrost.auth.password_hash.as_deref(),
+            Some("$scrypt$owner-hash")
+        );
     }
 
     #[tokio::test]

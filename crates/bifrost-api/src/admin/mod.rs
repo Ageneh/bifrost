@@ -1,5 +1,7 @@
 //! Wire types for the configuration admin API under `/bifrost/config`.
 
+pub mod auth;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

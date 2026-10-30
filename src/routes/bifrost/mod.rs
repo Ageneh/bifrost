@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod backend;
 pub mod config;
 pub mod service;
@@ -81,6 +82,7 @@ async fn not_found() -> Response {
 /// added here can never be mounted outside it.
 pub fn router() -> Router<AppState> {
     Router::new()
+        .nest("/auth", auth::router())
         .nest("/service", service::router())
         .nest("/backend", backend::router())
         .nest("/config", config::router())
