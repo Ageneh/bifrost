@@ -366,7 +366,7 @@ impl Z2mBackend {
         z2mws: &mut Z2mWebSocket,
         ent_id: &Uuid,
     ) -> ApiResult<()> {
-        log::trace!("[{}] Entertainment start", self.name);
+        log::trace!("[{}] Entertainment start for area {ent_id}", self.name);
         let lock = self.state.lock().await;
 
         let ent: &EntertainmentConfiguration = lock.get_id(*ent_id)?;
@@ -380,18 +380,28 @@ impl Z2mBackend {
         log::trace!("[{}] Resolving entertainment channels", self.name);
         for chan in chans {
             for member in &chan.members {
-                let ent: &Entertainment = lock.get(&member.service)?;
-                let light_id = ent
-                    .renderer_reference
-                    .ok_or(HueError::NotFound(member.service.rid))?;
-                let topic = self
-                    .rmap
-                    .get(&light_id)
-                    .ok_or(HueError::NotFound(light_id.rid))?;
-                let dev = self
-                    .network
-                    .get(topic)
-                    .ok_or(HueError::NotFound(member.service.rid))?;
+                let Ok(ent) = lock.get::<Entertainment>(&member.service) else {
+                    continue;
+                };
+
+                // An area may name lights this server does not own. Ignoring
+                // them is what lets the server that does own them stream:
+                // failing here ends this backend's event loop, which is the
+                // outage this wave exists to remove.
+                let Some(light_id) = ent.renderer_reference else {
+                    continue;
+                };
+                let Some(topic) = self.rmap.get(&light_id) else {
+                    log::debug!(
+                        "[{}] Ignoring area {ent_id}: it does not own light {}",
+                        self.name,
+                        light_id.rid
+                    );
+                    continue;
+                };
+                let Some(dev) = self.network.get(topic) else {
+                    continue;
+                };
 
                 let segment_addr = dev.network_address + member.index;
 
@@ -421,6 +431,11 @@ impl Z2mBackend {
             es.start_stream(z2mws).await?;
 
             self.entstream = Some(es);
+        } else {
+            log::debug!(
+                "[{}] Area {ent_id} has no lights this server owns; ignoring",
+                self.name
+            );
         }
 
         Ok(())
@@ -429,6 +444,7 @@ impl Z2mBackend {
     async fn backend_entertainment_frame(
         &mut self,
         z2mws: &mut Z2mWebSocket,
+        _area: &Uuid,
         frame: &HueStreamLightsV2,
     ) -> ApiResult<()> {
         if let Some(es) = &mut self.entstream {
@@ -440,7 +456,11 @@ impl Z2mBackend {
         Ok(())
     }
 
-    async fn backend_entertainment_stop(&mut self, z2mws: &mut Z2mWebSocket) -> ApiResult<()> {
+    async fn backend_entertainment_stop(
+        &mut self,
+        z2mws: &mut Z2mWebSocket,
+        _area: &Uuid,
+    ) -> ApiResult<()> {
         log::debug!("Stopping entertainment mode..");
         if let Some(es) = &mut self.entstream.take() {
             let mut lock = self.state.lock().await;
@@ -511,11 +531,13 @@ impl Z2mBackend {
                 self.backend_entertainment_start(z2mws, ent_id).await
             }
 
-            BackendRequest::EntertainmentFrame(frame) => {
-                self.backend_entertainment_frame(z2mws, frame).await
+            BackendRequest::EntertainmentFrame(area, frame) => {
+                self.backend_entertainment_frame(z2mws, area, frame).await
             }
 
-            BackendRequest::EntertainmentStop() => self.backend_entertainment_stop(z2mws).await,
+            BackendRequest::EntertainmentStop(area) => {
+                self.backend_entertainment_stop(z2mws, area).await
+            }
 
             BackendRequest::ZigbeeDeviceDiscovery(rlink, zbd) => {
                 self.backend_zigbee_device_discovery(z2mws, rlink, zbd)

@@ -21,6 +21,7 @@ use svc::traits::{BoxDynService, Service};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
@@ -264,18 +265,42 @@ impl Z2mBackend {
     pub async fn event_loop(
         &mut self,
         chan: &mut Receiver<Arc<BackendRequest>>,
+        frames: &mut Receiver<Arc<BackendRequest>>,
         mut socket: Z2mWebSocket,
         commands: Option<&mut mpsc::UnboundedReceiver<Z2mCommand>>,
     ) -> ApiResult<()> {
         let mut commands = commands;
+        let mut frames_open = true;
         loop {
             select! {
                 // all backend event handling implemented in backend::z2m::backend_event
                 pkt = chan.recv() => {
-                    let api_req = pkt?;
-                    self.handle_backend_event(&mut socket, api_req).await?;
-                    // FIXME: this used to be our "throttle" feature, but it breaks entertainment mode
-                    /* tokio::time::sleep(std::time::Duration::from_millis(100)).await; */
+                    match pkt {
+                        Ok(api_req) => self.handle_backend_event(&mut socket, api_req).await?,
+                        // the control channel never carries frames, so lag
+                        // here means this backend is behind on state changes;
+                        // dropping them beats ending the loop
+                        Err(broadcast::error::RecvError::Lagged(missed)) => {
+                            log::warn!("[{}] Backend events lagged, dropped {missed}", self.name);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            return Err(ApiError::UnexpectedZ2mEof);
+                        }
+                    }
+                },
+
+                // entertainment frames, on their own channel: a backend that
+                // falls behind drops frames and keeps running
+                frame = recv_frame(&mut frames_open, frames) => {
+                    match frame {
+                        Some(Ok(frame)) => self.handle_backend_event(&mut socket, frame).await?,
+                        Some(Err(broadcast::error::RecvError::Lagged(missed))) => {
+                            log::debug!("[{}] Dropped {missed} entertainment frames", self.name);
+                        }
+                        Some(Err(broadcast::error::RecvError::Closed)) | None => {
+                            frames_open = false;
+                        }
+                    }
                 },
 
                 // all bridge event handling implemented in backend::z2m::bridge_event
@@ -330,6 +355,21 @@ async fn recv_command(
         Some(commands) => commands.recv().await,
         None => std::future::pending().await,
     }
+}
+
+/// Await the next frame, or nothing once the frame channel is closed.
+///
+/// A closed channel returns immediately on every poll, which would spin the
+/// event loop; the flag turns that branch into one that never completes.
+async fn recv_frame(
+    open: &mut bool,
+    frames: &mut Receiver<Arc<BackendRequest>>,
+) -> Option<Result<Arc<BackendRequest>, broadcast::error::RecvError>> {
+    if !*open {
+        return std::future::pending().await;
+    }
+
+    Some(frames.recv().await)
 }
 
 #[async_trait]
@@ -406,10 +446,13 @@ impl Service for Z2mBackend {
             }
 
             let z2m_socket = Z2mWebSocket::new(self.name.clone(), socket);
-            let mut chan = self.state.lock().await.backend_event_stream();
+            let (mut chan, mut frames) = {
+                let lock = self.state.lock().await;
+                (lock.backend_event_stream(), lock.frame_stream())
+            };
             let mut command_rx = self.command_rx.take();
             let res = self
-                .event_loop(&mut chan, z2m_socket, command_rx.as_mut())
+                .event_loop(&mut chan, &mut frames, z2m_socket, command_rx.as_mut())
                 .await;
             self.command_rx = command_rx;
 

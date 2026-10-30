@@ -47,12 +47,26 @@ impl WebSocketTask {
         Ok(None)
     }
 
+    /// One control event from a backend.
+    ///
+    /// Entertainment frames never reach here — they travel on their own
+    /// channel and nobody would read a diagnostic screen at 120 fps — and a
+    /// socket that fell behind skips what it missed instead of closing.
     fn handle_backend_event(
         &self,
-        backend_event: &Arc<BackendRequest>,
+        backend_event: Result<Arc<BackendRequest>, broadcast::error::RecvError>,
     ) -> BifrostApiResult<Option<Update>> {
-        log::info!("Backend event: {backend_event:?}");
-        Ok(Some(Update::BackendRequest((**backend_event).clone())))
+        match backend_event {
+            Ok(event) => {
+                log::debug!("Backend event: {event:?}");
+                Ok(Some(Update::BackendRequest((*event).clone())))
+            }
+            Err(broadcast::error::RecvError::Lagged(missed)) => {
+                log::warn!("Backend subscriber lagged {missed} events; skipping them");
+                Ok(None)
+            }
+            Err(broadcast::error::RecvError::Closed) => Ok(None),
+        }
     }
 
     /// A change to the inventory. A socket that fell behind re-reads the
@@ -135,7 +149,7 @@ impl WebSocketTask {
         loop {
             let reply = select! {
                 Some(msg) = self.ws.recv() => self.handle_websocket_message(&msg?),
-                backend_event = backend_events.recv() => self.handle_backend_event(&backend_event?),
+                backend_event = backend_events.recv() => self.handle_backend_event(backend_event),
                 service_event = svc_events.recv() => self.handle_service_event(service_event).await,
                 log_event = log_events.recv() => Ok(log_event.ok().map(Update::Log)),
                 hue_event = hue_events.recv() => self.handle_hue_event(hue_event?),

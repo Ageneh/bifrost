@@ -201,7 +201,7 @@ impl EntertainmentService {
         // read the first frame, and use it to look up area, color mode, etc.
         // this means we discard the first frame, but since we expect at least
         // 10 frames *per second*, this is acceptable.
-        let mut sz = Self::read_frame(&mut sess, &mut buf).await?;
+        let sz = Self::read_frame(&mut sess, &mut buf).await?;
         log::trace!("First entertainment frame: {}", hex::encode(&buf[..sz]));
         let raw = HueStreamPacket::parse(&buf[..sz])?;
 
@@ -217,6 +217,31 @@ impl EntertainmentService {
 
         drop(lock);
 
+        let area = header.area;
+        let result = self.pump(&mut sess, &mut buf, sz, &header).await;
+
+        // the area is the only thing that names what to stop, and it is known
+        // from here on, so the stop is sent whatever ended the loop
+        if let Err(err) = self
+            .res
+            .lock()
+            .await
+            .backend_request(BackendRequest::EntertainmentStop(area))
+        {
+            log::warn!("Could not announce the end of stream {area}: {err}");
+        }
+
+        result
+    }
+
+    /// Forward every frame of one session until the sender stops.
+    async fn pump(
+        &self,
+        sess: &mut SslStream<UdpStream>,
+        buf: &mut [u8],
+        mut sz: usize,
+        header: &HueStreamPacketV2,
+    ) -> ApiResult<()> {
         let mut fps = 0;
         let mut period = Utc::now().timestamp();
 
@@ -239,16 +264,16 @@ impl EntertainmentService {
 
             let ts = Utc::now().timestamp();
             if period != ts {
-                log::info!("Incoming entertainment fps: {fps}");
+                log::debug!("Incoming entertainment fps: {fps}");
                 period = ts;
                 fps = 0;
             }
 
             fps += 1;
-            let req = BackendRequest::EntertainmentFrame(pkt.lights);
+            let req = BackendRequest::EntertainmentFrame(pkt.area, pkt.lights);
             self.res.lock().await.backend_request(req)?;
 
-            sz = Self::read_frame(&mut sess, &mut buf).await?;
+            sz = Self::read_frame(sess, buf).await?;
             if sz == 0 {
                 break;
             }
@@ -310,9 +335,6 @@ impl Service for EntertainmentService {
                 Ok(()) => log::info!("Entertainment stream finished"),
                 Err(err) => log::error!("Entertainment stream error: {err}"),
             }
-
-            let req = BackendRequest::EntertainmentStop();
-            self.res.lock().await.backend_request(req)?;
         }
     }
 

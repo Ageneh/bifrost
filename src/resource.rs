@@ -31,12 +31,22 @@ pub struct Resources {
     version: SwVersion,
     state_updates: Arc<Notify>,
     backend_updates: Sender<Arc<BackendRequest>>,
+    /// Entertainment frames on their own channel.
+    ///
+    /// A frame is worth nothing once a newer one exists, so a consumer that
+    /// falls behind may drop the ones it missed. Sharing the control channel
+    /// meant one slow backend took the channel down for every other consumer,
+    /// and a lagged receiver ended that backend's event loop.
+    backend_frames: Sender<Arc<BackendRequest>>,
     hue_event_stream: HueEventStream,
 }
 
 impl Resources {
     const MAX_SCENE_ID: u32 = 100;
     const HUE_EVENTS_BUFFER_SIZE: usize = 128;
+    const BACKEND_EVENT_CAPACITY: usize = 32;
+    /// Roughly a quarter second of frames at the 120 fps a Sync box sends.
+    const FRAME_CAPACITY: usize = 32;
 
     #[allow(clippy::new_without_default)]
     #[must_use]
@@ -45,7 +55,8 @@ impl Resources {
             state,
             version,
             state_updates: Arc::new(Notify::new()),
-            backend_updates: Sender::new(32),
+            backend_updates: Sender::new(Self::BACKEND_EVENT_CAPACITY),
+            backend_frames: Sender::new(Self::FRAME_CAPACITY),
             hue_event_stream: HueEventStream::new(Self::HUE_EVENTS_BUFFER_SIZE),
         }
     }
@@ -638,12 +649,28 @@ impl Resources {
         self.backend_updates.subscribe()
     }
 
+    /// The entertainment frames, on the channel that may drop them.
+    #[must_use]
+    pub fn frame_stream(&self) -> Receiver<Arc<BackendRequest>> {
+        self.backend_frames.subscribe()
+    }
+
     pub fn backend_request(&self, req: BackendRequest) -> ApiResult<()> {
-        if !matches!(req, BackendRequest::EntertainmentFrame(_)) {
+        let frame = matches!(req, BackendRequest::EntertainmentFrame(..));
+        if !frame {
             log::debug!("Backend request: {req:#?}");
         }
 
-        self.backend_updates.send(Arc::new(req))?;
+        let req = Arc::new(req);
+
+        // a frame nobody reads is a frame nobody wanted: no backend is
+        // running for the area yet, and the stream is not an error
+        if frame {
+            self.backend_frames.send(req).ok();
+            return Ok(());
+        }
+
+        self.backend_updates.send(req)?;
 
         Ok(())
     }
