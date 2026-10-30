@@ -46,6 +46,29 @@ bifrost:
     # a session ends after this many minutes without a request
     idle_minutes: 60
 
+    # let Home Assistant Ingress requests in without a Bifrost login
+    #
+    # Home Assistant authenticated the user already. Trust is decided by
+    # the address the connection comes from, never by a header.
+    trust_ingress: true
+
+    # addresses Ingress requests are trusted from
+    #
+    # The default is the Home Assistant Supervisor's Ingress proxy,
+    # 172.30.32.2, the only address Home Assistant's add-on documentation
+    # says Ingress connects from
+    # (https://contributors.home-assistant.io/apps/guides/ingress/).
+    # Do not widen this to the Supervisor network: other add-ons share it.
+    trusted_cidrs: ["172.30.32.2/32"]
+
+    # extra host names the web interface answers to [optional!]
+    #
+    # Besides the bridge ipaddress and its mDNS name
+    # (bifrost-<last 3 MAC bytes>.local), requests naming any other host
+    # are refused. This stops DNS rebinding attacks. Add the name here if
+    # you reach Bifrost under your own DNS name.
+    allowed_hosts: ["bifrost.home.lan"]
+
 # Bridge section
 #
 # Settings for hue bridge emulation
@@ -218,12 +241,10 @@ Bifrost keeps the active configuration and an optional draft. A draft is
 saved to `config.draft.yaml` next to `config.yaml`, survives a restart, and
 takes effect only when you apply it.
 
-> **Note:** Until authentication lands, every endpoint under `/bifrost`
-> answers `403 Forbidden`, `GET /bifrost/config` included. A deny-all guard
-> (`require_admin`) covers the whole `/bifrost` nest, and `/bifrost` sends no
-> CORS headers: only the Hue routes (`/api`, `/clip`, `/eventstream`,
-> `/auth`, `/updater`, `/licenses`, `/description.xml`) stay open to every
-> origin.
+Every endpoint below requires the admin login; see "Admin login". `/bifrost`
+sends no CORS headers: only the Hue routes (`/api`, `/clip`, `/eventstream`,
+`/auth`, `/updater`, `/licenses`, `/description.xml`) stay open to every
+origin.
 
 | Endpoint | Purpose |
 |---|---|
@@ -298,6 +319,25 @@ password ends every other one.
 Failed logins and setup codes from one address are slowed down: after three
 failures, each further one doubles the wait (up to 15 minutes) before that
 address may try again. Other addresses are never affected.
+
+### Request rules
+
+Every request under `/bifrost` passes these checks, in order:
+
+1. A request carrying `X-Ingress-Path` is refused with `403` unless it comes
+   from a `trusted_cidrs` address and `trust_ingress` is on. From a trusted
+   address it needs no login.
+2. The `Host` must be the bridge `ipaddress`, its mDNS name, or one of
+   `allowed_hosts`; otherwise `403`.
+3. Without a live session: `401`. Only `GET /bifrost/auth/session`,
+   `POST /bifrost/auth/login` and `POST /bifrost/auth/setup` answer without
+   one.
+4. Every request that changes something, and the `/bifrost/ws` websocket
+   upgrade, needs an `Origin` (or `Referer`) of this bridge: same host,
+   same port. Otherwise `403`.
+5. A changing request with a session needs the session's CSRF token, from
+   `GET /bifrost/auth/session`, in the `X-Bifrost-Csrf` header; otherwise
+   `403`.
 
 | Endpoint | Purpose |
 |---|---|

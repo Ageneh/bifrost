@@ -176,7 +176,7 @@ pub fn router(appstate: AppState, hue_cors: CorsLayer) -> Router<()> {
 
     Router::new()
         .merge(hue)
-        .nest("/bifrost", bifrost::router())
+        .nest("/bifrost", bifrost::router(appstate.clone()))
         .with_state(appstate)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
 }
