@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use hue::api::{
     Button, ButtonReport, Contact, DevicePower, DimmingUpdate, GroupedLight, Light, LightLevel,
-    LightUpdate, Motion, RType, Resource, Room, Temperature,
+    LightUpdate, Motion, RType, Resource, Room, Temperature, ZigbeeConnectivity,
+    ZigbeeConnectivityStatus,
 };
 use z2m::api::{
     BridgeDevices, BridgeEvent, DeviceRemoveResponse, Group, GroupMemberChange, Message,
@@ -93,19 +94,43 @@ impl Z2mBackend {
     }
 
     /// Apply a `<name>/availability` report.
-    fn handle_availability(&self, friendly_name: &str, payload: &Value) {
-        let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(friendly_name))
-        else {
-            return;
-        };
-
+    async fn handle_availability(&self, friendly_name: &str, payload: &Value) {
         let availability = match payload.get("state").and_then(Value::as_str) {
             Some("online") => Availability::Online,
             Some("offline") => Availability::Offline,
             _ => return,
         };
 
-        inventory.set_availability(&self.name, &ieee, availability, Some(Utc::now()));
+        if let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(friendly_name)) {
+            inventory.set_availability(&self.name, &ieee, availability, Some(Utc::now()));
+        }
+
+        // the Hue resource says the same thing as the inventory: a client
+        // that reads `zigbee_connectivity` must not see a device as fine
+        // while the console shows it as gone
+        let Some(device) = self.network.get(friendly_name) else {
+            return;
+        };
+        let link = RType::ZigbeeConnectivity.deterministic(&device.ieee_address);
+        let status = match availability {
+            Availability::Online => ZigbeeConnectivityStatus::Connected,
+            Availability::Offline | Availability::Unknown => {
+                ZigbeeConnectivityStatus::ConnectivityIssue
+            }
+        };
+
+        let mut res = self.state.lock().await;
+        if res.get::<ZigbeeConnectivity>(&link).is_err() {
+            return;
+        }
+        if let Err(err) = res.update::<ZigbeeConnectivity>(&link.rid, |known| {
+            known.status = status.clone();
+        }) {
+            log::error!(
+                "[{}] Cannot record availability of {friendly_name}: {err:?}",
+                self.name
+            );
+        }
     }
 
     /// Record that a device reported something on `topic`.
@@ -461,7 +486,7 @@ impl Z2mBackend {
     async fn handle_device_message(&mut self, msg: RawMessage) -> ApiResult<()> {
         if let Some(name) = msg.topic.strip_suffix("/availability") {
             // https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-availability
-            self.handle_availability(name, &msg.payload);
+            self.handle_availability(name, &msg.payload).await;
             return Ok(());
         }
 

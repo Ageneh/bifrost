@@ -405,6 +405,83 @@ async fn an_availability_flip_is_visible_in_the_same_second() {
     }
 }
 
+/// Ticket 184: battery, power and availability, on one sensor.
+#[tokio::test]
+async fn a_sensor_reports_its_battery_and_its_reach() {
+    let mock = MockZ2m::start_w04("motion").await.unwrap();
+    let devices = "devices:\n  \"0x00158d0000000020\":\n    enabled: true\n";
+    let fixture = Fixture::start_with_devices(&[("server1", mock.url())], devices).await;
+
+    fixture.device("0x00158d0000000020").await;
+
+    // the device says it is at 12 %, and reports motion with the same message
+    mock.publish(
+        "Hall motion",
+        &serde_json::json!({ "occupancy": true, "battery": 12, "voltage": 2900 }),
+    );
+
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let device = fixture
+            .inventory()
+            .device("server1", "0x00158d0000000020")
+            .expect("the sensor is listed");
+        if device.battery == Some(12)
+            && device.readings.iter().any(|reading| {
+                reading.property == "occupancy" && reading.value == serde_json::json!(true)
+            })
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the reading never arrived: {device:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // the Hue resource carries the same battery, and names its state
+    let power = {
+        let res = fixture.state.res.lock().await;
+        res.get_resources_by_type(hue::api::RType::DevicePower)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                hue::api::Resource::DevicePower(power) => Some(power),
+                _ => None,
+            })
+            .expect("a DevicePower resource")
+    };
+    assert_eq!(power.power_state["battery_level"], 12);
+    assert_eq!(power.power_state["battery_state"], "low");
+
+    // a device that goes away is not reachable in the Hue API either
+    mock.set_availability("Hall motion", false);
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let reachable = {
+            let res = fixture.state.res.lock().await;
+            res.get_resources_by_type(hue::api::RType::ZigbeeConnectivity)
+                .into_iter()
+                .find_map(|rr| match rr.obj {
+                    hue::api::Resource::ZigbeeConnectivity(zigcon) => Some(matches!(
+                        zigcon.status,
+                        hue::api::ZigbeeConnectivityStatus::Connected
+                    )),
+                    _ => None,
+                })
+                .expect("a ZigbeeConnectivity resource")
+        };
+        if !reachable {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the connectivity never flipped"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn a_server_that_goes_away_leaves_its_devices_unknown_not_online() {
     let mock = MockZ2m::start_w04("light").await.unwrap();
