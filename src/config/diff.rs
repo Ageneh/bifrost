@@ -160,6 +160,7 @@ fn classify(change: &Change, servers: &[String]) -> Effect {
         z2m => (),
         bifrost => (),
         rooms => (),
+        devices => (),
         unknown => (),
     });
 

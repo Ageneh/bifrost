@@ -114,6 +114,12 @@ impl MockZ2m {
         Self::start(&fixture_path(&format!("w04/devices-{class}.json"))).await
     }
 
+    /// Start the mock on the wave-5 fixture, `tests/fixtures/w05/z2m/bridge.json`:
+    /// three lights, one of them in no group.
+    pub async fn start_w05() -> Result<Self> {
+        Self::start(&fixture_path("w05/z2m/bridge.json")).await
+    }
+
     /// The friendly names of the devices the greeting announces.
     #[must_use]
     pub fn device_names(&self) -> Vec<String> {

@@ -275,8 +275,25 @@ impl Z2mBackend {
     }
 
     async fn bridge_devices(&mut self, devices: &BridgeDevices) -> ApiResult<()> {
+        // the overrides decide which devices reach the Hue API at all, so
+        // they are read before anything is imported
+        let config = self.store.active();
+
         for dev in devices {
             self.network.insert(dev.friendly_name.clone(), dev.clone());
+
+            let ieee = dev.ieee_address.to_string();
+            if config.device(&ieee).and_then(|device| device.enabled) == Some(false) {
+                log::info!(
+                    "[{}] Leaving {ieee} ({}) out: disabled in the configuration",
+                    self.name,
+                    dev.friendly_name
+                );
+                self.ignore.insert(dev.friendly_name.clone());
+                self.publish_device(dev);
+                continue;
+            }
+
             if let Some(exp) = dev.expose_light() {
                 log::info!(
                     "[{}] Adding light {:?}: [{}] ({})",
@@ -310,6 +327,9 @@ impl Z2mBackend {
             */
         }
 
+        // devices and groups arrive in either order, so the room overrides
+        // are tried after each
+        self.apply_device_rooms().await?;
         self.sync_placement().await;
 
         Ok(())
@@ -448,6 +468,7 @@ impl Z2mBackend {
                     self.record_group_members(grp, true);
                     self.add_group(grp).await?;
                 }
+                self.apply_device_rooms().await?;
                 self.sync_placement().await;
             }
 

@@ -24,12 +24,23 @@ use crate::error::ApiResult;
 use crate::model::state::AuxData;
 
 impl Z2mBackend {
+    #[allow(clippy::too_many_lines)]
     pub async fn add_light(
         &mut self,
         apidev: &z2m::api::Device,
         expose: &ExposeLight,
     ) -> ApiResult<()> {
         let name = &apidev.friendly_name;
+
+        // a name override replaces what the Hue API shows, never the topic
+        // z2m is addressed by
+        let ieee = apidev.ieee_address.to_string();
+        let override_name = self
+            .store
+            .active()
+            .device(&ieee)
+            .and_then(|device| device.name.clone());
+        let shown_name = override_name.unwrap_or_else(|| name.clone());
 
         let link_device = RType::Device.deterministic(&apidev.ieee_address);
         let link_light = RType::Light.deterministic(&apidev.ieee_address);
@@ -38,7 +49,7 @@ impl Z2mBackend {
         let link_zigcon = RType::ZigbeeConnectivity.deterministic(&apidev.ieee_address);
 
         let product_data = DeviceProductData::guess_from_device(apidev);
-        let metadata = LightMetadata::new(product_data.product_archetype.clone(), name);
+        let metadata = LightMetadata::new(product_data.product_archetype.clone(), &shown_name);
 
         let effects =
             apidev.manufacturer.as_deref() == Some(DeviceProductData::SIGNIFY_MANUFACTURER_NAME);
@@ -333,6 +344,68 @@ impl Z2mBackend {
         let glight = GroupedLight::new(link_room);
 
         res.add(&link_glight, Resource::GroupedLight(glight))?;
+        drop(res);
+
+        Ok(())
+    }
+
+    /// Place the devices the configuration puts in a room by hand.
+    ///
+    /// Membership normally comes from the z2m group set, which is what the
+    /// Rooms screen writes. `devices.<ieee>.room` exists for a configuration
+    /// written without the UI, and is applied once the groups are known so
+    /// the room it names already exists.
+    // the house error type is what every resource operation returns, so it
+    // is propagated rather than flattened here
+    #[allow(clippy::result_large_err)]
+    pub async fn apply_device_rooms(&mut self) -> ApiResult<()> {
+        // the key may be spelled `0x…` or, unquoted, as a YAML integer;
+        // both are normalised to what zigbee2mqtt prints
+        let config = self.store.active();
+        let overrides: Vec<(String, String)> = config
+            .devices
+            .iter()
+            .filter_map(|(key, device)| {
+                let room = device.room.clone()?;
+                let number = crate::config::ieee_number(key)?;
+                Some((format!("0x{number:016x}"), room))
+            })
+            .collect();
+
+        if overrides.is_empty() {
+            return Ok(());
+        }
+
+        let mut res = self.state.lock().await;
+
+        for (ieee, topic) in overrides {
+            let Some(address) = self
+                .network
+                .values()
+                .find(|dev| dev.ieee_address.to_string() == ieee)
+                .map(|dev| dev.ieee_address.clone())
+            else {
+                log::debug!(
+                    "[{}] No device at {ieee}, its room is not applied",
+                    self.name
+                );
+                continue;
+            };
+
+            let Some(grouped) = self.map.get(&topic).copied() else {
+                log::warn!(
+                    "[{}] Device {ieee} names the unknown room {topic}",
+                    self.name
+                );
+                continue;
+            };
+
+            let room_link = res.get::<GroupedLight>(&grouped)?.owner;
+            let device_link = RType::Device.deterministic(&address);
+            res.update(&room_link.rid, |room: &mut Room| {
+                room.children.insert(device_link);
+            })?;
+        }
         drop(res);
 
         Ok(())

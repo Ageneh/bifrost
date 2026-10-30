@@ -19,7 +19,7 @@ use bifrost_api::admin::{
     SetupStatus, Severity, ValidationError,
 };
 use bifrost_api::config::{
-    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, RoomConfig, Z2mServer,
+    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, RoomConfig, Z2mServer,
 };
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
@@ -60,6 +60,7 @@ fn export_typescript_bindings() {
     BifrostConfig::export_all(&cfg).unwrap();
     BridgeConfig::export_all(&cfg).unwrap();
     RoomConfig::export_all(&cfg).unwrap();
+    DeviceConfig::export_all(&cfg).unwrap();
     Z2mServer::export_all(&cfg).unwrap();
 
     Service::export_all(&cfg).unwrap();

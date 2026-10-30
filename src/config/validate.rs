@@ -17,6 +17,7 @@ use crate::config::AppConfig;
 
 const WEBSOCKET_SCHEMES: &[&str] = &["ws", "wss"];
 const KNOWN_ROOM_KEYS: &[&str] = &["name", "icon"];
+const KNOWN_DEVICE_KEYS: &[&str] = &["enabled", "name", "room"];
 const IP_FIELDS: &[&str] = &["ipaddress", "netmask", "gateway"];
 const PORT_FIELDS: &[&str] = &["http_port", "https_port", "entm_port"];
 
@@ -159,6 +160,39 @@ fn check_document(document: &Value, errors: &mut Vec<ValidationError>) {
                     errors.push(ValidationError::warning(
                         format!("rooms.{room}.{key}"),
                         format!("unknown room setting; expected one of {KNOWN_ROOM_KEYS:?}"),
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(devices) = document.get("devices").and_then(Value::as_object) {
+        for (ieee, settings) in devices {
+            let path = format!("devices.{ieee}");
+
+            // a friendly name here would orphan the override on the next
+            // rename in zigbee2mqtt
+            if bifrost_api::config::ieee_number(ieee).is_none() {
+                errors.push(ValidationError::error(
+                    &path,
+                    "the key is the IEEE address zigbee2mqtt prints, e.g. 0x0017880100000001",
+                ));
+            } else if !ieee.starts_with("0x") {
+                // still the same device, but the file reads as a number
+                errors.push(ValidationError::warning(
+                    &path,
+                    "quote the key, or YAML reads it as a number: \"0x0017880100000001\"",
+                ));
+            }
+
+            let Some(settings) = settings.as_object() else {
+                continue;
+            };
+            for key in settings.keys() {
+                if !KNOWN_DEVICE_KEYS.contains(&key.as_str()) {
+                    errors.push(ValidationError::warning(
+                        format!("{path}.{key}"),
+                        format!("unknown device setting; expected one of {KNOWN_DEVICE_KEYS:?}"),
                     ));
                 }
             }
