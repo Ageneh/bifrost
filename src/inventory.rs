@@ -28,7 +28,7 @@ const EVENT_BUFFER: usize = 64;
 /// `bifrost-api` so the UI's bindings are generated from them.
 pub use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, InventorySnapshot,
-    InventoryUpdate, PermitJoinState, ResourceRef, RoomRef, ServerInfo,
+    InventoryUpdate, PermitJoinState, ResourceRef, RoomRef, SensorReading, ServerInfo,
 };
 
 /// A change to the inventory, published to every subscriber.
@@ -207,6 +207,69 @@ impl Inventory {
         self.publish(InventoryEvent::Device(Box::new(updated)));
     }
 
+    /// Record the last value a sensor property reported.
+    ///
+    /// One entry per property: a motion sensor that also reports temperature
+    /// keeps both, and a repeat of the same property replaces its old value
+    /// rather than piling up.
+    pub fn set_reading(
+        &self,
+        server: &str,
+        ieee: &str,
+        property: &str,
+        value: serde_json::Value,
+        at: DateTime<Utc>,
+    ) {
+        let updated = {
+            let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+            let Some(device) = state
+                .devices
+                .get_mut(&(server.to_string(), ieee.to_string()))
+            else {
+                return;
+            };
+            let reading = SensorReading {
+                property: property.to_string(),
+                value,
+                at,
+            };
+            match device
+                .readings
+                .iter_mut()
+                .find(|entry| entry.property == property)
+            {
+                Some(known) => *known = reading,
+                None => device.readings.push(reading),
+            }
+            device.last_seen = Some(at);
+            let snapshot = device.clone();
+            state.updated = at;
+            snapshot
+        };
+        self.publish(InventoryEvent::Device(Box::new(updated)));
+    }
+
+    /// Record a device's battery level, in percent.
+    pub fn set_battery(&self, server: &str, ieee: &str, battery: u8) {
+        let updated = {
+            let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+            let Some(device) = state
+                .devices
+                .get_mut(&(server.to_string(), ieee.to_string()))
+            else {
+                return;
+            };
+            if device.battery == Some(battery) {
+                return;
+            }
+            device.battery = Some(battery);
+            let snapshot = device.clone();
+            state.updated = Utc::now();
+            snapshot
+        };
+        self.publish(InventoryEvent::Device(Box::new(updated)));
+    }
+
     /// Replace a device's room and group refs.
     pub fn set_placement(
         &self,
@@ -350,6 +413,8 @@ pub fn from_z2m(
         room: previous.and_then(|prev| prev.room.clone()),
         group: previous.and_then(|prev| prev.group.clone()),
         last_seen: previous.and_then(|prev| prev.last_seen),
+        battery: previous.and_then(|prev| prev.battery),
+        readings: previous.map_or_else(Vec::new, |prev| prev.readings.clone()),
     }
 }
 
@@ -742,6 +807,8 @@ mod tests {
             room: None,
             group: None,
             last_seen: None,
+            battery: None,
+            readings: vec![],
         }
     }
 
@@ -779,6 +846,57 @@ mod tests {
         ));
         assert!(inventory.device("a", "0x01").is_none());
         assert!(!inventory.remove("a", "0x01"));
+    }
+
+    #[test]
+    fn a_sensor_reading_is_kept_per_property_and_replaced_in_place() {
+        let inventory = Inventory::new();
+        let mut events = inventory.subscribe();
+        inventory.upsert(device("a", "0x01", "Hall motion"));
+
+        let first = Utc::now();
+        inventory.set_reading("a", "0x01", "occupancy", serde_json::json!(true), first);
+        inventory.set_reading(
+            "a",
+            "0x01",
+            "illuminance",
+            serde_json::json!(312.0),
+            first,
+        );
+
+        let device = inventory.device("a", "0x01").unwrap();
+        assert_eq!(device.readings.len(), 2);
+        assert_eq!(device.readings[0].property, "occupancy");
+        assert_eq!(device.readings[0].value, serde_json::json!(true));
+        assert_eq!(device.last_seen, Some(first));
+
+        // the same property again replaces its value instead of appending
+        let second = first + chrono::Duration::seconds(5);
+        inventory.set_reading("a", "0x01", "occupancy", serde_json::json!(false), second);
+
+        let device = inventory.device("a", "0x01").unwrap();
+        assert_eq!(device.readings.len(), 2);
+        assert_eq!(device.readings[0].value, serde_json::json!(false));
+        assert_eq!(device.readings[0].at, second);
+
+        // every change is published, so the screen redraws without polling
+        assert!(events.try_recv().is_ok());
+    }
+
+    #[test]
+    fn a_battery_level_is_published_only_when_it_changes() {
+        let inventory = Inventory::new();
+        let mut events = inventory.subscribe();
+        inventory.upsert(device("a", "0x01", "Hall motion"));
+        let _ = events.try_recv().unwrap();
+
+        inventory.set_battery("a", "0x01", 87);
+        assert_eq!(inventory.device("a", "0x01").unwrap().battery, Some(87));
+        assert!(events.try_recv().is_ok());
+
+        // the same level again is not a change worth a frame
+        inventory.set_battery("a", "0x01", 87);
+        assert!(events.try_recv().is_err());
     }
 
     #[test]

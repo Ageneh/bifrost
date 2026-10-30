@@ -202,6 +202,8 @@ mod tests {
             room: None,
             group: None,
             last_seen: None,
+            battery: None,
+            readings: vec![],
         }
     }
 
