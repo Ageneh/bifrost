@@ -8,7 +8,7 @@ test.beforeEach(async ({ request }) => {
 
 /** The two zones the fixture server streams on. */
 const ZONE_TV = '2f1c4f1e-0000-4000-8000-000000000001'
-const ZONE_DESK = '2f1c4f1e-0000-4000-8000-000000000002' 
+const ZONE_DESK = '2f1c4f1e-0000-4000-8000-000000000002'
 
 /**
  * Wave 3's Home: the doctor.
