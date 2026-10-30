@@ -1,0 +1,131 @@
+{
+  "14": {
+    "capabilities": {
+      "certified": true,
+      "control": {
+        "colorgamut": [
+          [
+            0.6915,
+            0.3083
+          ],
+          [
+            0.17,
+            0.7
+          ],
+          [
+            0.1532,
+            0.0475
+          ]
+        ],
+        "colorgamuttype": "C",
+        "ct": {
+          "max": 500,
+          "min": 153
+        },
+        "maxlumen": 800,
+        "mindimlevel": 10
+      },
+      "streaming": {
+        "proxy": true,
+        "renderer": true
+      }
+    },
+    "config": {
+      "archetype": "spotbulb",
+      "direction": "downwards",
+      "function": "mixed",
+      "startup": {
+        "configured": true,
+        "mode": "safety"
+      }
+    },
+    "manufacturername": "Signify Netherlands B.V.",
+    "modelid": "LTW010",
+    "name": "Hall lamp",
+    "productname": "LTW010",
+    "state": {
+      "alert": "select",
+      "bri": 100,
+      "colormode": "ct",
+      "ct": 400,
+      "effect": "none",
+      "mode": "homeautomation",
+      "on": false,
+      "reachable": true
+    },
+    "swupdate": {
+      "lastinstall": "<time>",
+      "state": "noupdates"
+    },
+    "swversion": "1.93.11",
+    "type": "Extended color light",
+    "uniqueid": "afd21f326bd4529b8a84c7134ccd8fe4"
+  },
+  "9": {
+    "capabilities": {
+      "certified": true,
+      "control": {
+        "colorgamut": [
+          [
+            0.6915,
+            0.3083
+          ],
+          [
+            0.17,
+            0.7
+          ],
+          [
+            0.1532,
+            0.0475
+          ]
+        ],
+        "colorgamuttype": "C",
+        "ct": {
+          "max": 500,
+          "min": 153
+        },
+        "maxlumen": 800,
+        "mindimlevel": 10
+      },
+      "streaming": {
+        "proxy": true,
+        "renderer": true
+      }
+    },
+    "config": {
+      "archetype": "spotbulb",
+      "direction": "downwards",
+      "function": "mixed",
+      "startup": {
+        "configured": true,
+        "mode": "safety"
+      }
+    },
+    "manufacturername": "Signify Netherlands B.V.",
+    "modelid": "LCT015",
+    "name": "Kitchen ceiling",
+    "productid": "100b-10c",
+    "productname": "LCT015",
+    "state": {
+      "alert": "select",
+      "bri": 200,
+      "colormode": "xy",
+      "ct": 300,
+      "effect": "none",
+      "mode": "homeautomation",
+      "on": true,
+      "reachable": true,
+      "xy": [
+        0.31271,
+        0.32902
+      ]
+    },
+    "swupdate": {
+      "lastinstall": "<time>",
+      "state": "noupdates"
+    },
+    "swversion": "1.93.11",
+    "type": "Extended color light",
+    "uniqueid": "c649035c09485211a3e859e785037746"
+  }
+}

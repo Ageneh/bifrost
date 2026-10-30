@@ -20,6 +20,7 @@ pub mod clip;
 pub mod eventstream;
 pub mod extractor;
 pub mod licenses;
+pub mod ui;
 pub mod updater;
 pub mod upnp;
 
@@ -177,6 +178,7 @@ pub fn router(appstate: AppState, hue_cors: CorsLayer) -> Router<()> {
     Router::new()
         .merge(hue)
         .nest("/bifrost", bifrost::router(appstate.clone()))
+        .fallback(ui::fallback)
         .with_state(appstate)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
 }

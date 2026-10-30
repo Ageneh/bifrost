@@ -1,0 +1,48 @@
+{
+  "data": [
+    {
+      "actions": [
+        {
+          "action": {
+            "dimming": {
+              "brightness": 50.0
+            },
+            "on": {
+              "on": true
+            }
+          },
+          "target": {
+            "rid": "afd21f32-6bd4-529b-8a84-c7134ccd8fe4",
+            "rtype": "light"
+          }
+        },
+        {
+          "action": {
+            "on": {
+              "on": false
+            }
+          },
+          "target": {
+            "rid": "c649035c-0948-5211-a3e8-59e785037746",
+            "rtype": "light"
+          }
+        }
+      ],
+      "auto_dynamic": false,
+      "group": {
+        "rid": "c71458be-36df-560e-933e-2c9ff8dd182f",
+        "rtype": "room"
+      },
+      "id": "<scene>",
+      "id_v1": "/scenes/20",
+      "metadata": {
+        "name": "Regress"
+      },
+      "recall": {},
+      "speed": 0.0,
+      "status": null,
+      "type": "scene"
+    }
+  ],
+  "errors": []
+}

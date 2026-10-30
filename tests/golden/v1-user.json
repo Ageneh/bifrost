@@ -1,0 +1,239 @@
+{
+  "config": {
+    "UTC": "<time>",
+    "analyticsconsent": false,
+    "apiversion": "1.70.0",
+    "backup": {
+      "errorcode": 0,
+      "status": "idle"
+    },
+    "bridgeid": "001122FFFE334455",
+    "datastoreversion": "176",
+    "dhcp": true,
+    "factorynew": false,
+    "gateway": "127.0.0.1",
+    "internetservices": {
+      "internet": "connected",
+      "remoteaccess": "connected",
+      "swupdate": "connected",
+      "time": "connected"
+    },
+    "ipaddress": "127.0.0.1",
+    "linkbutton": false,
+    "localtime": "<time>",
+    "mac": "00:11:22:33:44:55",
+    "modelid": "BSB002",
+    "name": "Bifrost Bridge",
+    "netmask": "255.0.0.0",
+    "portalconnection": "disconnected",
+    "portalservices": true,
+    "portalstate": {
+      "communication": "disconnected",
+      "incoming": false,
+      "outgoing": false,
+      "signedon": false
+    },
+    "proxyaddress": "none",
+    "proxyport": 0,
+    "replacesbridgeid": null,
+    "starterkitid": "",
+    "swupdate2": {
+      "autoinstall": {
+        "on": true,
+        "updatetime": "<time-of-day>"
+      },
+      "bridge": {
+        "lastinstall": "<time>",
+        "state": "noupdates"
+      },
+      "checkforupdate": false,
+      "lastchange": "<time>",
+      "state": "noupdates"
+    },
+    "swversion": "1970084010",
+    "timezone": "UTC",
+    "whitelist": {
+      "01010101-0202-0303-0404-050505050505": {
+        "create date": "<time>",
+        "last use date": "<time>",
+        "name": "User#foo"
+      }
+    },
+    "zigbeechannel": 25
+  },
+  "groups": {
+    "18": {
+      "action": {
+        "alert": "none",
+        "on": false
+      },
+      "class": "Other",
+      "lights": [
+        "9",
+        "14"
+      ],
+      "name": "Kitchen",
+      "recycle": false,
+      "sensors": [],
+      "state": {
+        "all_on": false,
+        "any_on": false
+      },
+      "type": "Room"
+    }
+  },
+  "lights": {
+    "14": {
+      "capabilities": {
+        "certified": true,
+        "control": {
+          "colorgamut": [
+            [
+              0.6915,
+              0.3083
+            ],
+            [
+              0.17,
+              0.7
+            ],
+            [
+              0.1532,
+              0.0475
+            ]
+          ],
+          "colorgamuttype": "C",
+          "ct": {
+            "max": 500,
+            "min": 153
+          },
+          "maxlumen": 800,
+          "mindimlevel": 10
+        },
+        "streaming": {
+          "proxy": true,
+          "renderer": true
+        }
+      },
+      "config": {
+        "archetype": "spotbulb",
+        "direction": "downwards",
+        "function": "mixed",
+        "startup": {
+          "configured": true,
+          "mode": "safety"
+        }
+      },
+      "manufacturername": "Signify Netherlands B.V.",
+      "modelid": "LTW010",
+      "name": "Hall lamp",
+      "productname": "LTW010",
+      "state": {
+        "alert": "select",
+        "bri": 100,
+        "colormode": "ct",
+        "ct": 400,
+        "effect": "none",
+        "mode": "homeautomation",
+        "on": false,
+        "reachable": true
+      },
+      "swupdate": {
+        "lastinstall": "<time>",
+        "state": "noupdates"
+      },
+      "swversion": "1.93.11",
+      "type": "Extended color light",
+      "uniqueid": "afd21f326bd4529b8a84c7134ccd8fe4"
+    },
+    "9": {
+      "capabilities": {
+        "certified": true,
+        "control": {
+          "colorgamut": [
+            [
+              0.6915,
+              0.3083
+            ],
+            [
+              0.17,
+              0.7
+            ],
+            [
+              0.1532,
+              0.0475
+            ]
+          ],
+          "colorgamuttype": "C",
+          "ct": {
+            "max": 500,
+            "min": 153
+          },
+          "maxlumen": 800,
+          "mindimlevel": 10
+        },
+        "streaming": {
+          "proxy": true,
+          "renderer": true
+        }
+      },
+      "config": {
+        "archetype": "spotbulb",
+        "direction": "downwards",
+        "function": "mixed",
+        "startup": {
+          "configured": true,
+          "mode": "safety"
+        }
+      },
+      "manufacturername": "Signify Netherlands B.V.",
+      "modelid": "LCT015",
+      "name": "Kitchen ceiling",
+      "productid": "100b-10c",
+      "productname": "LCT015",
+      "state": {
+        "alert": "select",
+        "bri": 200,
+        "colormode": "xy",
+        "ct": 300,
+        "effect": "none",
+        "mode": "homeautomation",
+        "on": true,
+        "reachable": true,
+        "xy": [
+          0.31271,
+          0.32902
+        ]
+      },
+      "swupdate": {
+        "lastinstall": "<time>",
+        "state": "noupdates"
+      },
+      "swversion": "1.93.11",
+      "type": "Extended color light",
+      "uniqueid": "c649035c09485211a3e859e785037746"
+    }
+  },
+  "resourcelinks": {},
+  "rules": {},
+  "scenes": {},
+  "schedules": {},
+  "sensors": {
+    "1": {
+      "config": {
+        "configured": false,
+        "on": true,
+        "sunriseoffset": 30,
+        "sunsetoffset": -30
+      },
+      "manufacturername": "Signify Netherlands B.V.",
+      "modelid": "PHDL00",
+      "name": "Daylight",
+      "state": {
+        "daylight": null,
+        "lastupdated": "none"
+      },
+      "swversion": "1.0",
+      "type": "Daylight"
+    }
+  }
+}

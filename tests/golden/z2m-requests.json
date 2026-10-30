@@ -1,0 +1,29 @@
+[
+  {
+    "payload": {
+      "state": "OFF"
+    },
+    "topic": "Kitchen/set"
+  },
+  {
+    "payload": {
+      "scene_store": {
+        "ID": 0,
+        "name": "Regress"
+      }
+    },
+    "topic": "Kitchen/set"
+  },
+  {
+    "payload": {
+      "scene_recall": 0
+    },
+    "topic": "Kitchen/set"
+  },
+  {
+    "payload": {
+      "scene_remove": 0
+    },
+    "topic": "Kitchen/set"
+  }
+]

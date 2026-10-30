@@ -70,9 +70,11 @@ workspace = true
 [features]
 default = [
     "server-banner",
+    "ui",
 ]
 
 server-banner = ["dep:termcolor"]
+ui = ["dep:rust-embed"]
 
 [profile.dev]
 debug = "limited"
@@ -137,6 +139,8 @@ tokio-native-tls = "0.3.1"
 tzfile = "0.1.3"
 bifrost-api = { version = "0.1.0", path = "crates/bifrost-api", features = ["mac"] }
 nix = { version = "0.30.0", default-features = false, features = ["socket"] }
+rust-embed = { version = "8.7.2", optional = true }
+mime_guess = { version = "2.0.5", default-features = false }
 
 [dev-dependencies]
 clap-stdin = "0.6.0"

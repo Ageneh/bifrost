@@ -29,6 +29,10 @@ struct Args {
     #[arg(long)]
     config: Option<Utf8PathBuf>,
 
+    /// Serve the web UI from this directory instead of the embedded copy
+    #[arg(long)]
+    ui_dir: Option<Utf8PathBuf>,
+
     /// Address setup mode listens on while the configuration file is
     /// missing or unreadable [default: `$BIFROST_SETUP_LISTEN`, or the
     /// default route's interface on port 80]
@@ -234,7 +238,12 @@ async fn run(args: Args) -> ApiResult<()> {
 
 #[tokio::main]
 async fn main() {
-    if let Err(err) = run(Args::parse()).await {
+    let args = Args::parse();
+    if let Some(dir) = args.ui_dir.clone() {
+        bifrost::routes::ui::serve_from_directory(dir);
+    }
+
+    if let Err(err) = run(args).await {
         log::error!("Bifrost error: {err}");
         log::error!("Fatal error encountered, cannot continue.");
     }

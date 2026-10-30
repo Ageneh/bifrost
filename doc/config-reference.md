@@ -8,6 +8,19 @@ directory of the configuration file.
 Settings Bifrost does not recognize are kept: saving the configuration through
 the admin API writes them back unchanged.
 
+Besides `config.yaml`, Bifrost writes these files, by default next to it:
+
+| File | Content |
+|---|---|
+| `config.draft.yaml` | Changes saved through the admin API but not applied yet. |
+| `config.yaml.bak` | The configuration as it was before the last apply. |
+| `state.yaml` | Paired Hue apps, resource ids, scenes and room names (`state_file`). |
+| `sessions.yaml` | Admin login sessions, beside `state.yaml`, readable by the owner only. |
+| `cert.pem` | The HTTPS certificate (`cert_file`). |
+
+Keep all of them together: the Docker Compose setup mounts one `data`
+directory for this reason (see [Docker Compose install](docker-compose-install.md)).
+
 ```yaml
 # Bifrost section [optional!]
 #
@@ -276,6 +289,26 @@ only after a restart.
 Secrets (z2m tokens, password hashes) are write-only. Reads show
 `<<REDACTED>>` for a secret that is set. On write, an absent, `null` or
 `<<REDACTED>>` secret keeps the existing value, and `""` clears it.
+
+### Web UI
+
+Bifrost serves its web UI from `/` on the HTTP and HTTPS ports. Paths that
+belong to the Hue API and the admin API (`/api`, `/auth`, `/bifrost`,
+`/clip`, `/description.xml`, `/eventstream`, `/licenses`, `/updater`) never
+return the UI: a path no route matches under one of them is an empty
+`404 Not Found`.
+
+The UI is built into the binary by the default `ui` Cargo feature, from
+`frontend/.output/public`. To serve a build from disk instead, start Bifrost
+with `--ui-dir <path>`. A binary built without a UI answers `/` with a
+plain-text `404`.
+
+Behind a reverse proxy that serves Bifrost under a path prefix, such as Home
+Assistant ingress, the proxy sends the prefix in the `X-Ingress-Path` header.
+Bifrost writes it into the page as `<base href>` and as
+`window.__BIFROST_BASE__`, both ending in `/`, so asset and API URLs resolve
+under the prefix. A header value that is not a plain absolute path is
+ignored, and the page uses `/`.
 
 ## Admin login
 
