@@ -15,7 +15,6 @@ const TITLES: Record<string, string> = {
   rooms: 'Rooms',
   entertainment: 'Entertainment',
   pairing: 'Pairing',
-  system: 'System',
 }
 
 const key = computed(() => String(route.params.slug ?? '').replace(/^\/+/, ''))

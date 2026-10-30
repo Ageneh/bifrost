@@ -23,7 +23,7 @@ const items: NavItem[] = [
   { key: 'rooms', label: 'Rooms', path: '/rooms', pending: true },
   { key: 'entertainment', label: 'Entertainment', path: '/entertainment', pending: true },
   { key: 'pairing', label: 'Pairing', path: '/pairing', pending: true },
-  { key: 'system', label: 'System', path: '/system', pending: true },
+  { key: 'system', label: 'System', path: '/system/bridge' },
 ]
 
 const route = useRoute()

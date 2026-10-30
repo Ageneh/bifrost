@@ -3,12 +3,38 @@
  * The console frame, or whatever comes before it: the session is read first
  * and decides between the setup panel, the sign-in panel and the shell.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useApi } from '~/composables/useApi'
 
-const { ready, authenticated, setupRequired } = useApi()
+const { client, ready, authenticated, setupRequired } = useApi()
 
-const bridgeName = computed(() => 'Bifrost')
+/**
+ * The name the running bridge reports. It is read from the active
+ * configuration, not from the draft: the header says what the bridge is
+ * called right now, and the draft may rename it later.
+ */
+const activeName = ref<string | null>(null)
+const bridgeName = computed(() => activeName.value ?? 'Bifrost')
+
+watch(
+  authenticated,
+  async (signedIn) => {
+    if (!signedIn) {
+      activeName.value = null
+      return
+    }
+    try {
+      const config = (await client.activeConfig()) as { bridge?: { name?: unknown } }
+      if (typeof config.bridge?.name === 'string' && config.bridge.name !== '') {
+        activeName.value = config.bridge.name
+      }
+    }
+    catch {
+      // the shell still renders; Home reports the read failure itself
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
