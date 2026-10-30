@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -205,6 +206,35 @@ impl Display for IeeeAddress {
         write!(f, "0x{:016x}", self.0)
     }
 }
+
+impl FromStr for IeeeAddress {
+    type Err = ParseIeeeAddressError;
+
+    /// Parse the address as z2m prints it, `0x` followed by 16 hex digits.
+    /// A bare hexadecimal or decimal number is accepted too, since YAML
+    /// reads an unquoted `0x…` key as a number.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let text = text.trim();
+        let number = text
+            .strip_prefix("0x")
+            .or_else(|| text.strip_prefix("0X"))
+            .map_or_else(|| text.parse(), |hex| u64::from_str_radix(hex, 16));
+
+        number.map(Self).map_err(|_| ParseIeeeAddressError)
+    }
+}
+
+/// The text is not an IEEE address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseIeeeAddressError;
+
+impl Display for ParseIeeeAddressError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not an IEEE address; expected 0x followed by 16 hex digits")
+    }
+}
+
+impl std::error::Error for ParseIeeeAddressError {}
 
 fn ieee_address<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where

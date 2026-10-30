@@ -14,12 +14,14 @@ use bifrost_api::admin::auth::{
     LoginRequest, LogoutRequest, PasswordChange, SessionResponse, SetupRequest,
 };
 use bifrost_api::admin::{
-    ApplyAction, ApplyPlan, ApplyResponse, ConfigChange, ConfigImport, DraftPatch, DraftResponse,
+    ApplyAction, ApplyFailure, ApplyPlan, ApplyResponse, ConfigChange, ConfigImport,
+    DiscoveredDevice, DiscoveredRoom, DiscoveryRequest, DiscoveryResult, DraftPatch, DraftResponse,
     DraftWrite, ErrorResponse, Reason, RestartRequest, RevisionRequest, RevisionResponse,
-    SetupStatus, Severity, ValidationError,
+    RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest, SetupStatus, Severity,
+    ValidationError, WizardProgress, WizardWrite,
 };
 use bifrost_api::config::{
-    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, RoomConfig, Z2mServer,
+    AppConfig, AuthConfig, BifrostConfig, BridgeConfig, DeviceConfig, RoomConfig, Z2mServer,
 };
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
@@ -60,6 +62,7 @@ fn export_typescript_bindings() {
     BifrostConfig::export_all(&cfg).unwrap();
     BridgeConfig::export_all(&cfg).unwrap();
     RoomConfig::export_all(&cfg).unwrap();
+    DeviceConfig::export_all(&cfg).unwrap();
     Z2mServer::export_all(&cfg).unwrap();
 
     Service::export_all(&cfg).unwrap();
@@ -80,6 +83,18 @@ fn export_typescript_bindings() {
     RestartRequest::export_all(&cfg).unwrap();
     RevisionResponse::export_all(&cfg).unwrap();
     ApplyResponse::export_all(&cfg).unwrap();
+    ApplyFailure::export_all(&cfg).unwrap();
+    RoomList::export_all(&cfg).unwrap();
+    RoomEntry::export_all(&cfg).unwrap();
+    RoomDevice::export_all(&cfg).unwrap();
+    RoomScene::export_all(&cfg).unwrap();
+    SceneRecallRequest::export_all(&cfg).unwrap();
+    WizardProgress::export_all(&cfg).unwrap();
+    WizardWrite::export_all(&cfg).unwrap();
+    DiscoveryRequest::export_all(&cfg).unwrap();
+    DiscoveryResult::export_all(&cfg).unwrap();
+    DiscoveredDevice::export_all(&cfg).unwrap();
+    DiscoveredRoom::export_all(&cfg).unwrap();
     ErrorResponse::export_all(&cfg).unwrap();
     SetupStatus::export_all(&cfg).unwrap();
 

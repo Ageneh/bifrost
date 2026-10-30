@@ -20,7 +20,7 @@ export interface NavItem {
 const items: NavItem[] = [
   { key: 'home', label: 'Home', path: '/' },
   { key: 'devices', label: 'Devices', path: '/devices' },
-  { key: 'rooms', label: 'Rooms', path: '/rooms', pending: true },
+  { key: 'rooms', label: 'Rooms', path: '/rooms' },
   { key: 'entertainment', label: 'Entertainment', path: '/entertainment', pending: true },
   { key: 'pairing', label: 'Pairing', path: '/pairing', pending: true },
   { key: 'system', label: 'System', path: '/system/bridge' },

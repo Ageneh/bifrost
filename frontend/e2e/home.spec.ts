@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+// every spec shares one fixture server, so each test starts from the same
+// draft instead of whatever the previous one left behind
+test.beforeEach(async ({ request }) => {
+  await request.post('__reset')
+})
+
 /**
  * Wave 3's Home: the doctor.
  *

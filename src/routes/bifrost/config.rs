@@ -4,6 +4,7 @@
 //! `409 Conflict` when that revision is stale. Secrets never leave the
 //! process: reads are redacted, and secret fields are write-only.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,9 +18,12 @@ use hyper::StatusCode;
 use serde_json::Value;
 
 use bifrost_api::admin::{
-    ApplyResponse, ConfigImport, DraftPatch, DraftResponse, DraftWrite, ErrorResponse,
-    RestartRequest, RevisionRequest, RevisionResponse,
+    ApplyFailure, ApplyResponse, ConfigImport, DraftPatch, DraftResponse, DraftWrite,
+    ErrorResponse, RestartRequest, RevisionRequest, RevisionResponse,
 };
+use bifrost_api::backend::BackendRequest;
+use hue::api::{RType, Room, RoomUpdate};
+use z2m::api::IeeeAddress;
 
 use crate::config::AppConfig;
 use crate::config::diff::{self, ApplyAction, ConfigChange};
@@ -221,7 +225,89 @@ async fn post_validate(Json(document): Json<Value>) -> Json<Vec<ValidationError>
     })
 }
 
-fn apply(state: &AppState, hook: &ApplyHook, revision: u64) -> ConfigApiResult<ApplyResponse> {
+/// Push a changed room's membership to the mesh, one room at a time.
+///
+/// This is the request a `PUT` to the room's v2 resource sends, so the mesh
+/// sees exactly what an edit in the UI would. The backend still holds the
+/// old children here, so it sends only the difference; the restart that
+/// follows re-imports the room with the new list. A room that cannot be
+/// reached is named and the others still apply.
+async fn replay_rooms(
+    state: &AppState,
+    previous: &AppConfig,
+    applied: &AppConfig,
+) -> Vec<ApplyFailure> {
+    let mut failures = vec![];
+
+    for (topic, room) in &applied.rooms {
+        let before = previous
+            .rooms
+            .get(topic)
+            .and_then(|room| room.devices.as_ref());
+        let after = room.devices.as_ref();
+        if before == after {
+            continue;
+        }
+
+        let path = format!("rooms.{topic}");
+
+        // dropping the list hands the room back to the group, which the
+        // re-import does on its own
+        let Some(devices) = after else {
+            continue;
+        };
+
+        let mut children = BTreeSet::new();
+        for ieee in devices {
+            let Ok(address) = ieee.parse::<IeeeAddress>() else {
+                failures.push(ApplyFailure {
+                    path: path.clone(),
+                    reason: format!("{ieee} is not an IEEE address"),
+                });
+                continue;
+            };
+            if state.inventory().devices_by_ieee(ieee).is_empty() {
+                failures.push(ApplyFailure {
+                    path: path.clone(),
+                    reason: format!("no device with the address {ieee} is on the network"),
+                });
+                continue;
+            }
+            children.insert(RType::Device.deterministic(&address));
+        }
+
+        let link = RType::Room.deterministic(topic.as_str());
+        let res = state.res.lock().await;
+
+        if res.get::<Room>(&link).is_err() {
+            failures.push(ApplyFailure {
+                path,
+                reason: "the room is not on the bridge yet".to_string(),
+            });
+            continue;
+        }
+
+        let update = RoomUpdate {
+            children: Some(children),
+            metadata: None,
+            services: None,
+        };
+        if let Err(err) = res.backend_request(BackendRequest::RoomUpdate(link, update)) {
+            failures.push(ApplyFailure {
+                path,
+                reason: err.to_string(),
+            });
+        }
+    }
+
+    failures
+}
+
+async fn apply(
+    state: &AppState,
+    hook: &ApplyHook,
+    revision: u64,
+) -> ConfigApiResult<ApplyResponse> {
     let outcome = state.store().apply(revision)?;
 
     log::info!(
@@ -230,6 +316,13 @@ fn apply(state: &AppState, hook: &ApplyHook, revision: u64) -> ConfigApiResult<A
         outcome.changes.len(),
         outcome.plan.restart_required.len()
     );
+
+    // the membership goes to the mesh before the restart, while the backend
+    // still holds what the groups said
+    let failed = replay_rooms(state, &outcome.previous, &outcome.applied).await;
+    for failure in &failed {
+        log::warn!("Apply left {} unchanged: {}", failure.path, failure.reason);
+    }
 
     // Run after responding: restarting the http listeners from inside a
     // request they serve would cut that request off.
@@ -245,6 +338,7 @@ fn apply(state: &AppState, hook: &ApplyHook, revision: u64) -> ConfigApiResult<A
         revision: outcome.revision,
         plan: outcome.plan,
         changes: outcome.changes,
+        failed,
     })
 }
 
@@ -253,7 +347,7 @@ async fn post_apply(
     hook: axum::Extension<ApplyHook>,
     Json(req): Json<RevisionRequest>,
 ) -> ConfigApiResult<Json<ApplyResponse>> {
-    Ok(Json(apply(&state, &hook, req.revision)?))
+    Ok(Json(apply(&state, &hook, req.revision).await?))
 }
 
 async fn post_restart(
@@ -270,7 +364,7 @@ async fn post_restart(
                 store.revision()
             ))
         })?;
-        Some(apply(&state, &hook, revision)?)
+        Some(apply(&state, &hook, revision).await?)
     } else {
         None
     };

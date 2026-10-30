@@ -3,11 +3,13 @@
 pub mod auth;
 pub mod certificate;
 pub mod logs;
+pub mod rooms;
 pub mod state;
 pub mod z2m;
 
 pub use certificate::CertificateInfo;
 pub use logs::{LogList, LogRecord};
+pub use rooms::{RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest};
 pub use state::{StateCounts, StateResetRequest, StateSummary};
 pub use z2m::{Z2mServerEntry, Z2mServerList, Z2mServerWrite};
 
@@ -178,6 +180,21 @@ pub struct ApplyResponse {
     pub revision: u64,
     pub plan: ApplyPlan,
     pub changes: Vec<ConfigChange>,
+    /// Work that the apply could not carry out, named by the setting it
+    /// belongs to. An apply that reports nothing here changed everything it
+    /// was asked to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<ApplyFailure>,
+}
+
+/// One part of an apply that did not reach the mesh.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ApplyFailure {
+    /// The configuration path, e.g. `rooms.Kitchen`.
+    pub path: String,
+    /// What went wrong, in the words the screen shows.
+    pub reason: String,
 }
 
 /// Error body of every configuration admin endpoint.
@@ -187,6 +204,70 @@ pub struct ErrorResponse {
     pub error: String,
     /// Validation findings, when the request was refused because of them.
     pub errors: Vec<ValidationError>,
+}
+
+/// Where the first-run wizard is, from `GET /bifrost/setup/wizard`.
+///
+/// The wizard keeps its own record beside the configuration draft, so a
+/// half-finished setup is never mistaken for unapplied edits and discarding
+/// a draft cannot throw setup away.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct WizardProgress {
+    /// The step the wizard is on, e.g. `identity`.
+    pub step: String,
+    /// What the wizard has collected so far, as a partial configuration.
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub values: serde_json::Value,
+    /// When the record was last written, RFC 3339.
+    pub updated_at: Option<String>,
+}
+
+/// Write the wizard's progress.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct WizardWrite {
+    pub step: String,
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub values: serde_json::Value,
+}
+
+/// Ask a z2m server what it can see, before the bridge exists.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DiscoveryRequest {
+    pub server: crate::config::Z2mServer,
+}
+
+/// One device a z2m server reported.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DiscoveredDevice {
+    /// The IEEE address, which is how an override names the device.
+    pub ieee: String,
+    pub friendly_name: String,
+    pub model: Option<String>,
+    pub vendor: Option<String>,
+    /// True where Bifrost can serve the device over the Hue API.
+    pub supported: bool,
+}
+
+/// One zigbee2mqtt group a server reported; a room is this group.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DiscoveredRoom {
+    /// The group's friendly name, which is the key under `rooms:`.
+    pub topic: String,
+    /// The IEEE addresses of the group's members.
+    pub members: Vec<String>,
+}
+
+/// What a discovery run found.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DiscoveryResult {
+    pub devices: Vec<DiscoveredDevice>,
+    pub rooms: Vec<DiscoveredRoom>,
 }
 
 /// Why Bifrost is in setup mode, from `GET /bifrost/setup/status`.

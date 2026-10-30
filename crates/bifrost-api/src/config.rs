@@ -313,6 +313,35 @@ pub struct RoomConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub icon: Option<RoomArchetype>,
+    /// The devices in this room, by IEEE address. Absent means the z2m
+    /// group decides; present means this list is the room, and apply sends
+    /// the difference to the group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<String>>,
+    #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub unknown: UnknownSettings,
+}
+
+/// What the configuration says about one device, keyed by IEEE address.
+///
+/// The address is the key and never the friendly name, so renaming a device
+/// in zigbee2mqtt does not orphan its override.
+#[derive(Clone, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DeviceConfig {
+    /// False keeps the device out of the Hue API while leaving it on the
+    /// network; absent means it imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The name the Hue API shows, in place of the z2m friendly name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The z2m group topic this device belongs to, for a configuration
+    /// written by hand. The Rooms screen sets membership through the group
+    /// instead, so this is never written by the UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
     #[serde(flatten)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
@@ -329,6 +358,10 @@ pub struct AppConfig {
     pub bifrost: BifrostConfig,
     #[serde(default)]
     pub rooms: BTreeMap<String, RoomConfig>,
+    /// Keyed by IEEE address, as z2m prints it.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "BTreeMap<String, DeviceConfig>"))]
+    pub devices: BTreeMap<String, DeviceConfig>,
     #[serde(flatten)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
@@ -363,6 +396,7 @@ impl Debug for AppConfig {
             .field("z2m", &self.z2m)
             .field("bifrost", &self.bifrost)
             .field("rooms", &self.rooms)
+            .field("devices", &self.devices)
             .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }
@@ -401,6 +435,18 @@ impl Debug for RoomConfig {
         f.debug_struct("RoomConfig")
             .field("name", &self.name)
             .field("icon", &self.icon)
+            .field("devices", &self.devices)
+            .field("unknown", &SettingNames(&self.unknown))
+            .finish()
+    }
+}
+
+impl Debug for DeviceConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceConfig")
+            .field("enabled", &self.enabled)
+            .field("name", &self.name)
+            .field("room", &self.room)
             .field("unknown", &SettingNames(&self.unknown))
             .finish()
     }
@@ -431,6 +477,36 @@ impl AppConfig {
         }
         changed
     }
+
+    /// The overrides for the device at `ieee`, as zigbee2mqtt prints it.
+    ///
+    /// A key written without quotes is a YAML integer, so the map may hold
+    /// `6623462340689921` where the file says `0x0017880100000002`. Both
+    /// spell the same device, and both find it here.
+    #[must_use]
+    pub fn device(&self, ieee: &str) -> Option<&DeviceConfig> {
+        if let Some(device) = self.devices.get(ieee) {
+            return Some(device);
+        }
+
+        let wanted = ieee_number(ieee)?;
+        self.devices
+            .iter()
+            .find(|(key, _)| ieee_number(key) == Some(wanted))
+            .map(|(_, device)| device)
+    }
+}
+
+/// The number an IEEE address names, in either spelling.
+#[must_use]
+pub fn ieee_number(key: &str) -> Option<u64> {
+    let text = key.trim();
+    text.strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .map_or_else(
+            || text.parse().ok(),
+            |hex| u64::from_str_radix(hex, 16).ok(),
+        )
 }
 
 impl Z2mServer {
@@ -664,6 +740,43 @@ mod tests {
         for name in ["api_secret", "extra", "secret_note", "future"] {
             assert!(debug.contains(name), "{name} missing: {debug}");
         }
+    }
+
+    #[test]
+    fn a_device_override_is_found_in_either_key_spelling() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "bridge": {
+                    "name": "Bifrost",
+                    "mac": "00:11:22:33:44:55",
+                    "ipaddress": "127.0.0.1",
+                    "netmask": "255.0.0.0",
+                    "gateway": "127.0.0.1",
+                    "timezone": "UTC"
+                },
+                "z2m": {"s": {"url": "ws://127.0.0.1:1"}},
+                "devices": {
+                    "6623462340689922": {"name": "From a number"},
+                    "0x0017880100000003": {"enabled": false}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        // the file said 0x0017880100000002; YAML read it as a number
+        assert_eq!(
+            config
+                .device("0x0017880100000002")
+                .and_then(|device| device.name.as_deref()),
+            Some("From a number")
+        );
+        assert_eq!(
+            config
+                .device("0x0017880100000003")
+                .and_then(|device| device.enabled),
+            Some(false)
+        );
+        assert!(config.device("0x0017880100000004").is_none());
     }
 
     #[test]

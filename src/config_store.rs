@@ -62,6 +62,8 @@ pub type ConfigStoreResult<T> = Result<T, ConfigStoreError>;
 pub struct ConfigPaths {
     pub config: Utf8PathBuf,
     pub draft: Utf8PathBuf,
+    /// The first-run wizard's own record, never the configuration draft.
+    pub wizard: Utf8PathBuf,
     pub backup: Utf8PathBuf,
     pub state: Utf8PathBuf,
     pub cert: Utf8PathBuf,
@@ -100,6 +102,7 @@ impl ConfigPaths {
         Self {
             config: config_file.to_path_buf(),
             draft: dir.join(format!("{stem}.draft.{extension}")),
+            wizard: dir.join(format!("{stem}.wizard.{extension}")),
             backup: dir.join(format!("{file_name}.bak")),
             state,
             cert: dir.join(&bifrost.cert_file),
@@ -467,6 +470,7 @@ mod tests {
 
         assert_eq!(paths.config, "config.yaml");
         assert_eq!(paths.draft, "config.draft.yaml");
+        assert_eq!(paths.wizard, "config.wizard.yaml");
         assert_eq!(paths.backup, "config.yaml.bak");
         assert_eq!(paths.state, "state.yaml");
         assert_eq!(paths.cert, "cert.pem");
@@ -484,6 +488,7 @@ mod tests {
         let paths = ConfigPaths::resolve(Utf8Path::new("/etc/bifrost/bifrost.yml"), &config);
 
         assert_eq!(paths.draft, "/etc/bifrost/bifrost.draft.yml");
+        assert_eq!(paths.wizard, "/etc/bifrost/bifrost.wizard.yml");
         assert_eq!(paths.backup, "/etc/bifrost/bifrost.yml.bak");
         assert_eq!(paths.cert, "/etc/bifrost/certs/cert.pem");
         assert_eq!(paths.state, "/var/lib/bifrost/state.yaml");
