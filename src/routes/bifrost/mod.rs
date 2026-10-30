@@ -4,6 +4,7 @@ pub mod config;
 pub mod logs;
 pub mod service;
 pub mod setup;
+pub mod state;
 pub mod websocket;
 pub mod z2m;
 
@@ -321,6 +322,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/z2m", z2m::router())
         .nest("/config", config::router())
         .nest("/logs", logs::router())
+        .nest("/state", state::router())
         .route("/ws", any(websocket))
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state, require_admin))

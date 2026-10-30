@@ -809,6 +809,8 @@ mod tests {
             "/bifrost/z2m/x",
             "/bifrost/ws",
             "/bifrost/logs",
+            "/bifrost/state/summary",
+            "/bifrost/state/reset",
             "/bifrost/auth/password",
         ] {
             let (status, _) = fixture.call(Method::GET, uri, Some(&session), None).await;

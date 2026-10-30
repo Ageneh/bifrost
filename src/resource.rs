@@ -93,6 +93,19 @@ impl Resources {
         self.add_bridge(bridge_id.to_owned())
     }
 
+    /// Throw the whole state away and start from a bridge with nothing on
+    /// it: every scene and every imported resource is gone.
+    ///
+    /// The version is kept, since it describes the firmware, not the state.
+    #[allow(clippy::result_large_err)]
+    pub fn reset(&mut self, bridge_id: &str) -> ApiResult<()> {
+        self.state = State::new();
+        self.init(bridge_id)?;
+        self.reset_all_streaming()?;
+        self.state_updates.notify_one();
+        Ok(())
+    }
+
     pub fn aux_get(&self, link: &ResourceLink) -> ApiResult<&AuxData> {
         self.state.aux_get(&link.rid)
     }

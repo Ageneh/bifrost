@@ -23,7 +23,7 @@ use bifrost_api::admin::{
 
 use crate::config::AppConfig;
 use crate::config::diff::{self, ApplyAction, ConfigChange};
-use crate::config::redact::{merge_patch, merge_secrets, redacted_config};
+use crate::config::redact::{merge_patch, merge_secrets, redacted_config, without_token};
 use crate::config::validate::{self, ValidationError};
 use crate::config_store::{ConfigStoreError, Draft};
 use crate::error::ApiResult;
@@ -289,8 +289,33 @@ async fn post_restart(
     Ok(Json(applied))
 }
 
+/// The configuration as an exportable document.
+///
+/// Authentication settings and z2m tokens are left out rather than redacted:
+/// an export is a configuration backup, not a copy of the bridge's secrets,
+/// and it is written to a file the user picks. On import an absent secret
+/// keeps the value the bridge already has.
+fn export_document(config: &AppConfig) -> serde_json::Result<Value> {
+    let mut document = serde_json::to_value(config)?;
+
+    if let Some(bifrost) = document.get_mut("bifrost").and_then(Value::as_object_mut) {
+        bifrost.remove("auth");
+    }
+
+    if let Some(servers) = document.get_mut("z2m").and_then(Value::as_object_mut) {
+        for server in servers.values_mut().filter_map(Value::as_object_mut) {
+            server.remove("token");
+            if let Some(Value::String(url)) = server.get_mut("url") {
+                *url = without_token(url);
+            }
+        }
+    }
+
+    Ok(document)
+}
+
 async fn get_export(State(state): State<AppState>) -> ConfigApiResult<Response> {
-    let document = redacted_config(&state.config())?;
+    let document = export_document(&state.config())?;
     let yaml = serde_yml::to_string(&document)?;
     Ok(([(CONTENT_TYPE, YAML_CONTENT_TYPE)], yaml).into_response())
 }
@@ -684,6 +709,53 @@ mod tests {
         assert_eq!(body["config"]["bridge"]["name"], "Imported");
         let draft = fixture.state.store().draft().unwrap().config;
         assert!(draft.z2m.servers["server1"].url.as_str().contains(SECRET));
+    }
+
+    #[tokio::test]
+    async fn export_omits_auth_and_z2m_tokens() {
+        let fixture = Fixture::new().await;
+        fixture
+            .state
+            .store()
+            .update_auth(|auth| {
+                auth.password_hash = Some("$scrypt$owner-hash".into());
+                true
+            })
+            .unwrap();
+
+        let (status, exported) = fixture.call(Method::GET, "/export", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let yaml = exported.as_str().unwrap();
+        assert!(!yaml.contains(SECRET), "{yaml}");
+        assert!(!yaml.contains("token"), "{yaml}");
+        assert!(!yaml.contains("password_hash"), "{yaml}");
+        assert!(!yaml.contains("$scrypt"), "{yaml}");
+        // the rest of the configuration is all there
+        assert!(yaml.contains("name: Bifrost"), "{yaml}");
+        assert!(yaml.contains("00:11:22:33:44:55"), "{yaml}");
+    }
+
+    #[tokio::test]
+    async fn importing_an_export_keeps_the_token_it_omitted() {
+        let fixture = Fixture::new().await;
+        let (_, exported) = fixture.call(Method::GET, "/export", None).await;
+        let yaml = exported.as_str().unwrap().to_string();
+
+        let (status, _) = fixture
+            .call(
+                Method::POST,
+                "/import",
+                Some(json!({"revision": 0, "yaml": yaml})),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let draft = fixture.state.store().draft().unwrap().config;
+        assert_eq!(
+            draft.z2m.servers["server1"].get_url().as_str(),
+            format!("ws://10.0.0.100:8080/api?token={SECRET}")
+        );
     }
 
     #[tokio::test]
