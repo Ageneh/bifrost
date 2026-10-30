@@ -8,11 +8,11 @@
 //! guards the resources.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
 use bifrost_api::entertainment::StreamStats;
@@ -91,6 +91,9 @@ pub struct StreamRegistry {
     /// A change to the set of streams, for the admin socket. The payload is
     /// the snapshot itself, so a socket never has to read the map.
     events: broadcast::Sender<Vec<StreamStats>>,
+    /// Wakes the sessions, so a stop takes effect on a sender that has gone
+    /// quiet instead of waiting out its read timeout.
+    wake: Arc<Notify>,
 }
 
 impl Default for StreamRegistry {
@@ -99,6 +102,7 @@ impl Default for StreamRegistry {
             streams: Mutex::new(BTreeMap::new()),
             stopping: Mutex::new(BTreeSet::new()),
             events: broadcast::channel(EVENT_BUFFER).0,
+            wake: Arc::new(Notify::new()),
         }
     }
 }
@@ -161,7 +165,23 @@ impl StreamRegistry {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(*area);
+        self.wake.notify_waiters();
         true
+    }
+
+    /// Resolve once a stop was asked for the stream of `area`.
+    ///
+    /// Cancel-safe: the session selects it against reading the next frame,
+    /// so a sender that stopped sending still ends its stream when the
+    /// screen asks it to.
+    pub async fn wait_for_stop(&self, area: &Uuid) {
+        loop {
+            let notified = self.wake.notified();
+            if self.stop_requested(area) {
+                return;
+            }
+            notified.await;
+        }
     }
 
     /// Whether a stop was asked for the stream of `area`.

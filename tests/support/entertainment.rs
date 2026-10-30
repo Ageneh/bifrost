@@ -100,3 +100,26 @@ pub fn frame(channels: u8) -> HueStreamLightsV2 {
             .collect(),
     )
 }
+
+/// A v2 entertainment packet: header, the area as dashed ASCII, then one
+/// 7-byte record per channel.
+///
+/// The wire format is what [`hue::stream::HueStreamPacket`] parses, so a
+/// client built on this speaks to the real handler rather than to a mock.
+#[must_use]
+pub fn packet(area: Uuid, sequence: u8, channels: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(16 + 36 + channels.len() * 7);
+
+    bytes.extend_from_slice(b"HueStream");
+    // version 2, no reserved bytes, rgb colour mode
+    bytes.extend_from_slice(&[0x02, 0x00, sequence, 0x00, 0x00, 0x00, 0x00]);
+    bytes.extend_from_slice(area.hyphenated().to_string().as_bytes());
+
+    for channel in channels {
+        bytes.push(*channel);
+        // a red at full scale, then green and blue at zero
+        bytes.extend_from_slice(&[0xff, 0xff, 0x00, 0x00, 0x00, 0x00]);
+    }
+
+    bytes
+}

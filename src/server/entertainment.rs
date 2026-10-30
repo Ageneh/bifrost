@@ -327,7 +327,14 @@ impl Session {
             let req = BackendRequest::EntertainmentFrame(pkt.area, pkt.lights);
             self.res.lock().await.backend_request(req)?;
 
-            sz = Self::read_frame(sess, buf).await?;
+            // the stop has to reach a sender that went quiet as well, so the
+            // wait for the next frame races the stop request
+            let next = tokio::select! {
+                read = Self::read_frame(sess, buf) => read?,
+                () = self.streams.wait_for_stop(&header.area) => break,
+            };
+
+            sz = next;
             if sz == 0 {
                 break;
             }

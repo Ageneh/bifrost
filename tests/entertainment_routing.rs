@@ -531,3 +531,57 @@ async fn two_areas_on_one_server_stream_independently() {
     }
     wait_for_count(&mock, "TV right/set", before_right + 1).await;
 }
+
+/// A consumer that falls behind loses frames and nothing else: the frame
+/// channel reports the gap, and the backend that streams them keeps running.
+///
+/// This is the case the wave exists for. Under the old design a lagged
+/// receiver ended that backend's event loop and closed the admin socket with
+/// it.
+#[tokio::test]
+async fn a_lagging_consumer_drops_frames_without_killing_a_backend() {
+    let a = MockZ2m::start(&fixture_path("w07/z2m/server-a.json"))
+        .await
+        .unwrap();
+    let b = MockZ2m::start(&fixture_path("w07/z2m/server-b.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start(&a, &b).await;
+    fixture.wait_for_lights().await;
+
+    let ent_a = fixture.entertainment(fixture.light(LIGHT_A)).await;
+    let area = {
+        let mut res = fixture.state.res.lock().await;
+        add_area(&mut res, "TV", &[ent_a])
+    };
+
+    // a consumer that never reads, like a socket that stopped draining
+    let mut lagging = fixture.state.res.lock().await.frame_stream();
+
+    fixture
+        .request(BackendRequest::EntertainmentStart(area))
+        .await;
+    wait_for_count(&a, "TV left/set", 1).await;
+
+    // more frames than the channel holds, far more than the backend's
+    // throttle forwards
+    for _ in 0..200 {
+        fixture
+            .request(BackendRequest::EntertainmentFrame(area, frame(1)))
+            .await;
+    }
+
+    let lagged = tokio::time::timeout(Duration::from_secs(5), lagging.recv())
+        .await
+        .expect("the lagging consumer was never told")
+        .expect_err("the lagging consumer kept up");
+
+    assert!(
+        matches!(lagged, tokio::sync::broadcast::error::RecvError::Lagged(_)),
+        "the frame channel closed instead of dropping frames: {lagged:?}"
+    );
+
+    // the backend is still there: a control request reaches its server
+    fixture.request(turn_on(fixture.light(LIGHT_A))).await;
+    a.wait_for("TV left/set").await;
+}
