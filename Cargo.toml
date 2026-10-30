@@ -76,6 +76,10 @@ default = [
 server-banner = ["dep:termcolor"]
 ui = ["dep:rust-embed"]
 
+# Export the TypeScript bindings the web UI is written against:
+# `cargo test --features ts` writes frontend/lib/generated.
+ts = ["dep:ts-rs", "bifrost-api/ts", "svc/ts"]
+
 [profile.dev]
 debug = "limited"
 split-debuginfo = "unpacked"
@@ -141,6 +145,7 @@ bifrost-api = { version = "0.1.0", path = "crates/bifrost-api", features = ["mac
 nix = { version = "0.30.0", default-features = false, features = ["socket"] }
 rust-embed = { version = "8.7.2", optional = true }
 mime_guess = { version = "2.0.5", default-features = false }
+ts-rs = { version = "12.0.1", optional = true, default-features = false, features = ["serde-compat", "serde-json-impl", "uuid-impl"] }
 
 [dev-dependencies]
 clap-stdin = "0.6.0"

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum Severity {
     /// The configuration must not be applied.
     Error,
@@ -15,6 +16,7 @@ pub enum Severity {
 
 /// One finding of configuration validation.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ValidationError {
     /// Dotted path of the offending setting, e.g. `bridge.http_port`.
     /// Empty when the problem concerns the document as a whole.
@@ -51,6 +53,7 @@ impl ValidationError {
 /// Secret values are redacted before this is built, so it is always safe to
 /// serialize.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ConfigChange {
     /// Dotted path of the setting, e.g. `z2m.server1.url`.
     pub path: String,
@@ -65,6 +68,7 @@ pub struct ConfigChange {
 /// Something applying a configuration does while the bridge keeps running.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum ApplyAction {
     /// The setting is read on use and takes effect immediately.
     Update { path: String },
@@ -80,6 +84,7 @@ pub enum ApplyAction {
 
 /// Why a setting only takes effect after Bifrost restarts.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Reason {
     pub path: String,
     pub message: String,
@@ -87,6 +92,7 @@ pub struct Reason {
 
 /// What applying a configuration change involves.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ApplyPlan {
     pub hot: Vec<ApplyAction>,
     pub restart_required: Vec<Reason>,
@@ -98,6 +104,7 @@ pub struct ApplyPlan {
 /// Secrets are write-only; on write, an absent, `null` or redacted secret
 /// keeps the existing value and `""` clears it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DraftResponse {
     /// Revision the next write must name.
     pub revision: u64,
@@ -111,6 +118,7 @@ pub struct DraftResponse {
 
 /// Replace the draft.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DraftWrite {
     pub revision: u64,
     pub config: serde_json::Value,
@@ -119,6 +127,7 @@ pub struct DraftWrite {
 /// Change the draft (or, without one, the active configuration) with a
 /// JSON merge patch (RFC 7386).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DraftPatch {
     pub revision: u64,
     pub patch: serde_json::Value,
@@ -126,6 +135,7 @@ pub struct DraftPatch {
 
 /// Replace the draft with an exported YAML document.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ConfigImport {
     pub revision: u64,
     pub yaml: String,
@@ -133,6 +143,7 @@ pub struct ConfigImport {
 
 /// A request that only names the revision it was based on.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RevisionRequest {
     pub revision: u64,
 }
@@ -140,17 +151,20 @@ pub struct RevisionRequest {
 /// Restart Bifrost, applying the draft first when one exists (which then
 /// requires `revision`).
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RestartRequest {
     pub revision: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RevisionResponse {
     pub revision: u64,
 }
 
 /// Result of applying the draft.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ApplyResponse {
     pub revision: u64,
     pub plan: ApplyPlan,
@@ -159,6 +173,7 @@ pub struct ApplyResponse {
 
 /// Error body of every configuration admin endpoint.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ErrorResponse {
     pub error: String,
     /// Validation findings, when the request was refused because of them.
@@ -167,6 +182,7 @@ pub struct ErrorResponse {
 
 /// Why Bifrost is in setup mode, from `GET /bifrost/setup/status`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SetupStatus {
     /// The configuration file Bifrost tried to read.
     pub config_file: String,

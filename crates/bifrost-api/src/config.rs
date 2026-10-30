@@ -70,9 +70,12 @@ fn default_trusted_cidrs() -> Vec<IpCidr> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BridgeConfig {
     pub name: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub mac: MacAddress,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub ipaddress: Ipv4Addr,
     #[serde(default = "default_http_port")]
     pub http_port: u16,
@@ -80,18 +83,24 @@ pub struct BridgeConfig {
     pub https_port: u16,
     #[serde(default = "default_entm_port")]
     pub entm_port: u16,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub netmask: Ipv4Addr,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub gateway: Ipv4Addr,
     pub timezone: String,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BifrostConfig {
     #[serde(default = "default_state_file")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub state_file: Utf8PathBuf,
     #[serde(default = "default_cert_file")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub cert_file: Utf8PathBuf,
     /// Admin authentication. Never changed through the configuration draft:
     /// only the `/bifrost/auth` endpoints, which require the password, write
@@ -99,6 +108,7 @@ pub struct BifrostConfig {
     #[serde(default)]
     pub auth: AuthConfig,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
@@ -205,6 +215,7 @@ impl<'de> Deserialize<'de> for IpCidr {
 
 /// Admin authentication for `/bifrost`. The Hue API stays open.
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AuthConfig {
     /// Hash of the admin password. Without one, Bifrost prints a setup code
     /// at startup and waits for the first password. Deleting it is how a
@@ -224,12 +235,14 @@ pub struct AuthConfig {
     /// Peers whose Ingress requests are trusted. Decided by the connecting
     /// address only, never by a header.
     #[serde(default = "default_trusted_cidrs")]
+    #[cfg_attr(feature = "ts", ts(type = "string[]"))]
     pub trusted_cidrs: Vec<IpCidr>,
     /// Extra host names the admin interface answers to, besides the bridge
     /// address and its `.local` name; e.g. a DNS name pointing at Bifrost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_hosts: Vec<String>,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
@@ -272,41 +285,52 @@ pub struct Z2mConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Z2mServer {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub url: Url,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_prefix: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_tls_verify: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub streaming_fps: Option<NonZeroU32>,
     /// z2m 2.x websocket auth token. Takes precedence over a `token` in the
     /// url query.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RoomConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub icon: Option<RoomArchetype>,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AppConfig {
     pub bridge: BridgeConfig,
+    /// Keyed by server name, which is how the file spells it.
+    #[cfg_attr(feature = "ts", ts(as = "BTreeMap<String, Z2mServer>"))]
     pub z2m: Z2mConfig,
     #[serde(default)]
     pub bifrost: BifrostConfig,
     #[serde(default)]
     pub rooms: BTreeMap<String, RoomConfig>,
     #[serde(flatten)]
+    #[cfg_attr(feature = "ts", ts(skip))]
     pub unknown: UnknownSettings,
 }
 
