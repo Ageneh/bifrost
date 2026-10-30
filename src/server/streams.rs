@@ -7,11 +7,12 @@
 //! await — and it keeps the per-frame path free of the async mutex that
 //! guards the resources.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use bifrost_api::entertainment::StreamStats;
@@ -77,10 +78,29 @@ fn rate(frames: u64, seconds: f64) -> u32 {
     (frames as f64 / seconds).round() as u32
 }
 
+/// How many stream changes a lagging admin socket may miss before it reads
+/// the snapshot instead.
+const EVENT_BUFFER: usize = 16;
+
 /// Every stream that is running, by area.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StreamRegistry {
     streams: Mutex<BTreeMap<Uuid, Entry>>,
+    /// The areas a stop was asked for; the session ends on its next frame.
+    stopping: Mutex<BTreeSet<Uuid>>,
+    /// A change to the set of streams, for the admin socket. The payload is
+    /// the snapshot itself, so a socket never has to read the map.
+    events: broadcast::Sender<Vec<StreamStats>>,
+}
+
+impl Default for StreamRegistry {
+    fn default() -> Self {
+        Self {
+            streams: Mutex::new(BTreeMap::new()),
+            stopping: Mutex::new(BTreeSet::new()),
+            events: broadcast::channel(EVENT_BUFFER).0,
+        }
+    }
 }
 
 impl StreamRegistry {
@@ -93,15 +113,64 @@ impl StreamRegistry {
         self.streams.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Tell every admin socket what the streams are doing now.
+    ///
+    /// Only called when the set of streams changes, never per frame: a
+    /// diagnostic screen does not need 120 updates a second.
+    fn announce(&self) {
+        let streams = self.snapshot();
+        // a send error only means no admin socket is open
+        let _ = self.events.send(streams);
+    }
+
+    /// The stream changes, for `/bifrost/ws`.
+    #[must_use]
+    pub fn subscribe(&self) -> broadcast::Receiver<Vec<StreamStats>> {
+        self.events.subscribe()
+    }
+
     /// Record that a session started for `area`, replacing anything the same
     /// area left behind.
     pub fn open(&self, area: Uuid) {
         self.lock().insert(area, Entry::new(area));
+        self.stopping
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&area);
+        self.announce();
     }
 
     /// Drop the entry for `area`; a session that ended is no longer listed.
     pub fn close(&self, area: &Uuid) {
         self.lock().remove(area);
+        self.stopping
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(area);
+        self.announce();
+    }
+
+    /// Ask the session streaming `area` to end, and answer whether there was
+    /// one to ask.
+    pub fn request_stop(&self, area: &Uuid) -> bool {
+        if !self.lock().contains_key(area) {
+            return false;
+        }
+
+        self.stopping
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(*area);
+        true
+    }
+
+    /// Whether a stop was asked for the stream of `area`.
+    #[must_use]
+    pub fn stop_requested(&self, area: &Uuid) -> bool {
+        self.stopping
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(area)
     }
 
     /// A frame arrived from the sender.
@@ -127,6 +196,7 @@ impl StreamRegistry {
         if let Some(entry) = self.lock().get_mut(area) {
             entry.stats.last_error = Some(error.to_string());
         }
+        self.announce();
     }
 
     /// The areas that are streaming right now.
@@ -217,6 +287,44 @@ mod tests {
         registry.set_error(&area, "gone");
 
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn a_stop_is_asked_for_once_and_cleared_with_the_stream() {
+        let registry = StreamRegistry::new();
+        let area = Uuid::new_v4();
+
+        // nothing to stop
+        assert!(!registry.request_stop(&area));
+        assert!(!registry.stop_requested(&area));
+
+        registry.open(area);
+        assert!(registry.request_stop(&area));
+        assert!(registry.stop_requested(&area));
+
+        // the session ends and the request goes with it, so the next stream
+        // on the same area is not stopped the moment it starts
+        registry.close(&area);
+        assert!(!registry.stop_requested(&area));
+
+        registry.open(area);
+        assert!(!registry.stop_requested(&area));
+    }
+
+    #[test]
+    fn every_change_is_announced() {
+        let registry = StreamRegistry::new();
+        let mut events = registry.subscribe();
+        let area = Uuid::new_v4();
+
+        registry.open(area);
+        let announced = events.try_recv().expect("the open was not announced");
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].area, area);
+
+        registry.close(&area);
+        let announced = events.try_recv().expect("the close was not announced");
+        assert_eq!(announced.len(), 0, "the closed stream is still listed");
     }
 
     #[test]

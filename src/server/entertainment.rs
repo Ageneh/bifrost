@@ -291,6 +291,14 @@ impl Session {
         let mut period = Utc::now().timestamp();
 
         loop {
+            // a stop from the admin screen ends the session here, on its
+            // next frame, rather than leaving the sender streaming into a
+            // backend that has already forgotten it
+            if self.streams.stop_requested(&header.area) {
+                log::info!("Stopping entertainment stream for area {}", header.area);
+                break;
+            }
+
             let view = &buf[..sz];
             log::trace!("Packet buffer: {}", view.escape_ascii());
 

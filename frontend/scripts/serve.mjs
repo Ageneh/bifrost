@@ -186,6 +186,43 @@ const SERVICES = {
 }
 
 /** True while the fixture stands in for a bridge with no configuration. */
+/**
+ * The entertainment zones and the streams running on them.
+ *
+ * Two streams, which is the point of the wave: the TV and a second client at
+ * once. A stop removes one row and leaves the other, and `__reset` puts both
+ * back.
+ */
+const ZONES = [
+  { id: '2f1c4f1e-0000-4000-8000-000000000001', name: 'Living room TV', type: 'screen', channels: 3 },
+  { id: '2f1c4f1e-0000-4000-8000-000000000002', name: 'Desk monitor', type: 'monitor', channels: 2 },
+]
+
+function initialStreams() {
+  return [
+    {
+      area: ZONES[0].id,
+      started: '2026-10-30T09:00:00Z',
+      fps_in: 50,
+      fps_out: 20,
+      frames: 12_000,
+      drops: 7_200,
+      last_error: null,
+    },
+    {
+      area: ZONES[1].id,
+      started: '2026-10-30T09:05:00Z',
+      fps_in: 30,
+      fps_out: 20,
+      frames: 3_600,
+      drops: 1_200,
+      last_error: null,
+    },
+  ]
+}
+
+let streams = initialStreams()
+
 let setupMode = false
 
 /** The first-run wizard's own record, beside the draft. */
@@ -604,6 +641,39 @@ async function handleApi(request, response, endpoint, search) {
     })
   }
 
+  // ---- entertainment ---------------------------------------------------
+
+  if (endpoint === 'entertainment/capabilities' && method === 'GET') {
+    return sendJson(response, {
+      max_streams: 2,
+      devices: [
+        { id: '2f1c4f1e-0000-4000-8000-0000000000a1', name: 'TV left', segments: 7, configurable: false, light: null },
+        { id: '2f1c4f1e-0000-4000-8000-0000000000a2', name: 'TV right', segments: 7, configurable: false, light: null },
+      ],
+      configurations: ZONES.map(zone => ({
+        id: zone.id,
+        name: zone.name,
+        configuration_type: zone.type,
+        status: 'active',
+        channels: zone.channels,
+        lights: [],
+      })),
+    })
+  }
+
+  if (endpoint === 'entertainment/status' && method === 'GET') {
+    return sendJson(response, { max_streams: 2, streams })
+  }
+
+  if (endpoint.startsWith('entertainment/') && endpoint.endsWith('/stop') && method === 'POST') {
+    const area = decodeURIComponent(endpoint.slice('entertainment/'.length, -'/stop'.length))
+    const before = streams.length
+    streams = streams.filter(stream => stream.area !== area)
+    return before === streams.length
+      ? send(response, 404, JSON.stringify({ error: 'No such stream', errors: [] }))
+      : sendJson(response, null)
+  }
+
   if (endpoint === 'state/summary' && method === 'GET') {
     return sendJson(response, STATE_SUMMARY)
   }
@@ -650,6 +720,7 @@ const server = createServer(async (request, response) => {
     linkButton.deadline = 0
     linkButton.window = 30
     pairingRecords = initialPairingRecords()
+    streams = initialStreams()
     draft.config = initialDraftConfig()
     draft.revision = 3
     for (const room of ROOMS) {

@@ -6,14 +6,19 @@
 //! frames no client will ever send. The UI says the TV or the app starts it.
 
 use axum::Router;
-use axum::extract::State;
-use axum::routing::get;
+use axum::extract::{Path, State};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use serde_json::Value;
+use uuid::Uuid;
 
+use bifrost_api::backend::BackendRequest;
 use bifrost_api::entertainment::{
     EntertainmentCapabilities, EntertainmentConfigurationSummary, EntertainmentDevice,
+    EntertainmentStatus,
 };
 
-use crate::routes::bifrost::BifrostApiResult;
+use crate::routes::bifrost::{BifrostApiResult, not_found};
 use crate::routes::extractor::Json;
 use crate::server::appstate::AppState;
 use hue::api::{Device, Entertainment, EntertainmentConfiguration, RType};
@@ -98,6 +103,49 @@ async fn capabilities(
     }))
 }
 
+/// What every stream is doing.
+///
+/// The screen asks once a second. The rates in the answer are measured over
+/// that second, and nothing is computed per frame.
+async fn status(State(state): State<AppState>) -> BifrostApiResult<Json<EntertainmentStatus>> {
+    Ok(Json(status_of(&state)))
+}
+
+/// The status, as both this route and the admin socket report it.
+#[must_use]
+pub fn status_of(state: &AppState) -> EntertainmentStatus {
+    EntertainmentStatus {
+        max_streams: state.config().bifrost.entertainment.max_streams,
+        streams: state.streams().snapshot(),
+    }
+}
+
+/// End the stream on one area.
+///
+/// The session ends on its next frame and the backend stops that area's
+/// lights and status. The stop is sent here as well, so the lights answer
+/// the request at once rather than up to a frame later.
+async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> BifrostApiResult<Response> {
+    let Ok(area) = id.parse::<Uuid>() else {
+        return Ok(not_found().await);
+    };
+
+    if !state.streams().request_stop(&area) {
+        return Ok(not_found().await);
+    }
+
+    state
+        .res
+        .lock()
+        .await
+        .backend_request(BackendRequest::EntertainmentStop(area))?;
+
+    Ok(Json(Value::Null).into_response())
+}
+
 pub fn router() -> Router<AppState> {
-    Router::new().route("/capabilities", get(capabilities))
+    Router::new()
+        .route("/capabilities", get(capabilities))
+        .route("/status", get(status))
+        .route("/{id}/stop", post(stop))
 }

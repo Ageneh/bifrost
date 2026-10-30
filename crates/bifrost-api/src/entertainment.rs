@@ -71,3 +71,15 @@ pub struct EntertainmentConfigurationSummary {
     /// The light services in it.
     pub lights: Vec<Uuid>,
 }
+
+/// What every stream is doing, as the diagnostics screen reads it.
+///
+/// The screen asks once a second; nothing here changes per frame.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentStatus {
+    /// How many sessions may run at once.
+    pub max_streams: u32,
+    /// Every stream that is running, by area.
+    pub streams: Vec<StreamStats>,
+}

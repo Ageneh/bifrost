@@ -7,6 +7,7 @@ use tokio::select;
 use tokio::sync::broadcast;
 
 use bifrost_api::backend::BackendRequest;
+use bifrost_api::entertainment::EntertainmentStatus;
 use bifrost_api::inventory::InventoryUpdate;
 use bifrost_api::service::Service;
 use bifrost_api::websocket::Update;
@@ -87,6 +88,25 @@ impl WebSocketTask {
         }
     }
 
+    /// A stream started, ended or failed.
+    fn handle_stream_event(
+        &self,
+        event: Result<Vec<bifrost_api::entertainment::StreamStats>, broadcast::error::RecvError>,
+    ) -> BifrostApiResult<Option<Update>> {
+        match event {
+            Ok(streams) => Ok(Some(Update::EntertainmentStatus(EntertainmentStatus {
+                max_streams: self.state.config().bifrost.entertainment.max_streams,
+                streams,
+            }))),
+            // the rates are in the snapshot, and the next change carries one
+            Err(broadcast::error::RecvError::Lagged(missed)) => {
+                log::warn!("Stream subscriber lagged {missed} events; skipping them");
+                Ok(None)
+            }
+            Err(broadcast::error::RecvError::Closed) => Ok(None),
+        }
+    }
+
     fn handle_hue_event(&self, hue_event: HueEventRecord) -> BifrostApiResult<Option<Update>> {
         log::info!("Hue event: {hue_event:?}");
         Ok(Some(Update::HueEvent(hue_event.block)))
@@ -133,6 +153,9 @@ impl WebSocketTask {
         let link_button = self.state.link_button();
         let mut link_button_events = link_button.subscribe();
 
+        let streams = self.state.streams();
+        let mut stream_events = streams.subscribe();
+
         let app_config = redacted_app_config(&self.state.config())?;
         self.send(Update::AppConfig(app_config)).await?;
 
@@ -146,6 +169,12 @@ impl WebSocketTask {
 
         self.send(Update::LinkButton(link_button.status())).await?;
 
+        self.send(Update::EntertainmentStatus(EntertainmentStatus {
+            max_streams: self.state.config().bifrost.entertainment.max_streams,
+            streams: streams.snapshot(),
+        }))
+        .await?;
+
         loop {
             let reply = select! {
                 Some(msg) = self.ws.recv() => self.handle_websocket_message(&msg?),
@@ -155,6 +184,7 @@ impl WebSocketTask {
                 hue_event = hue_events.recv() => self.handle_hue_event(hue_event?),
                 inventory_event = inventory_events.recv() => self.handle_inventory_event(inventory_event),
                 link_button_event = link_button_events.recv() => Ok(link_button_event.ok().map(Update::LinkButton)),
+                stream_event = stream_events.recv() => self.handle_stream_event(stream_event),
             };
 
             if let Some(reply) = reply? {

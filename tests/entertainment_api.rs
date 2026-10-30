@@ -135,6 +135,40 @@ z2m:
         }
     }
 
+    /// POST `uri` with a fresh session and its CSRF token.
+    async fn post(&self, uri: &str) -> (StatusCode, Value) {
+        let session = self.session();
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("host", BRIDGE_HOST)
+            .header("origin", format!("http://{BRIDGE_HOST}"))
+            .header("cookie", format!("bifrost_session={}", session.token))
+            .header("x-bifrost-csrf", &session.csrf)
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(CLIENT, 50000)));
+
+        let response = self.router.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+
+        (status, body)
+    }
+
+    fn session(&self) -> bifrost::auth::NewSession {
+        self.state
+            .auth()
+            .create_session(
+                CLIENT,
+                Expiry::from_config(&self.state.config().bifrost.auth),
+            )
+            .unwrap()
+    }
+
     /// GET `uri` with a fresh session.
     async fn get(&self, uri: &str) -> (StatusCode, Value) {
         let session = self
@@ -215,6 +249,40 @@ async fn capabilities_lists_devices_zones_and_the_limit() {
     assert_eq!(configurations[0]["configuration_type"], "screen", "{body}");
     assert_eq!(configurations[0]["status"], "inactive", "{body}");
     assert_eq!(configurations[0]["channels"], 1, "{body}");
+}
+
+/// The status answer carries the limit and one row per stream; with nothing
+/// streaming it is an empty list, not an error.
+#[tokio::test]
+async fn status_reports_the_limit_and_no_streams_when_idle() {
+    let mock = MockZ2m::start(&fixture_path("w07/z2m/server-both.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start(&mock).await;
+
+    let (status, body) = fixture.get("/bifrost/entertainment/status").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["max_streams"], 2, "{body}");
+    assert_eq!(body["streams"], serde_json::json!([]), "{body}");
+}
+
+/// Stopping something that is not streaming is a 404, not a crash, and the
+/// area id has to be a uuid.
+#[tokio::test]
+async fn stop_answers_not_found_for_anything_that_is_not_streaming() {
+    let mock = MockZ2m::start(&fixture_path("w07/z2m/server-both.json"))
+        .await
+        .unwrap();
+    let fixture = Fixture::start(&mock).await;
+    let area = uuid::Uuid::new_v4();
+
+    for uri in [
+        format!("/bifrost/entertainment/{area}/stop"),
+        "/bifrost/entertainment/not-a-uuid/stop".to_string(),
+    ] {
+        let (status, body) = fixture.post(&uri).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}: {body}");
+    }
 }
 
 /// The endpoint needs a session like every other read under `/bifrost`.
