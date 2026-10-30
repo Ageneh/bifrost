@@ -2,6 +2,7 @@ pub mod auth;
 pub mod backend;
 pub mod config;
 pub mod config_store;
+pub mod device_events;
 pub mod error;
 pub mod inventory;
 pub mod logbuffer;

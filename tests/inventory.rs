@@ -73,10 +73,15 @@ impl Fixture {
     /// Start Bifrost with a `devices:` section in the configuration.
     async fn start_with_devices(servers: &[(&str, &str)], devices: &str) -> Self {
         let dir = TempDir::new();
-        let servers: String = servers.iter().fold(String::new(), |mut yaml, (name, url)| {
-            yaml.push_str(&format!("  {name}:\n    url: {url}\n"));
-            yaml
-        });
+        let mut server_lines = String::new();
+        for (name, url) in servers {
+            server_lines.push_str("  ");
+            server_lines.push_str(name);
+            server_lines.push_str(":\n    url: ");
+            server_lines.push_str(url);
+            server_lines.push('\n');
+        }
+        let servers = server_lines;
         let yaml = format!(
             "\
 bridge:
@@ -246,6 +251,84 @@ async fn a_sensor_is_imported_only_when_the_configuration_enables_it() {
         };
         assert_eq!(has_motion, expect_import, "enabled={enabled:?}");
     }
+}
+
+/// Ticket 183: a remote's press becomes a button event, in the same second.
+#[tokio::test]
+async fn a_remote_press_becomes_a_button_event() {
+    let mock = MockZ2m::start_w04("remote").await.unwrap();
+    // a remote is opt-in like a sensor, so the configuration imports it
+    let devices = "devices:\n  \"0x00158d0000000060\":\n    enabled: true\n";
+    let fixture = Fixture::start_with_devices(&[("server1", mock.url())], devices).await;
+
+    let mut events = fixture.state.device_events().subscribe();
+
+    fixture
+        .wait_until("the remote to be imported", |_| true)
+        .await;
+    // the button resource exists only once the import has run
+    for _ in 0..200 {
+        if fixture
+            .state
+            .res
+            .lock()
+            .await
+            .get_resources_by_type(hue::api::RType::Button)
+            .len()
+            == 1
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let pressed = std::time::Instant::now();
+    mock.publish(
+        "Bedside switch/action",
+        &serde_json::json!({ "action": "single" }),
+    );
+
+    let event = tokio::time::timeout(PATIENCE, async {
+        loop {
+            if let Ok(event) = events.recv().await {
+                if event.kind == "action" {
+                    return event;
+                }
+            }
+        }
+    })
+    .await
+    .expect("an action event within the patience window");
+
+    assert!(
+        pressed.elapsed() < Duration::from_secs(1),
+        "the event was late"
+    );
+    assert_eq!(event.ieee, "0x00158d0000000060");
+    assert_eq!(event.value, serde_json::json!("single"));
+
+    // the same press updates the Hue Button resource the app reads
+    let reported = {
+        let res = fixture.state.res.lock().await;
+        res.get_resources_by_type(hue::api::RType::Button)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                hue::api::Resource::Button(button) => button.button.button_report,
+                _ => None,
+            })
+            .expect("the button resource has a report")
+    };
+    assert_eq!(reported.event, "single");
+
+    // and it is a reading the Devices screen shows
+    let device = fixture.device("0x00158d0000000060").await;
+    assert!(
+        device
+            .readings
+            .iter()
+            .any(|reading| reading.property == "action"),
+        "{device:?}"
+    );
 }
 
 #[tokio::test]

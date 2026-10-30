@@ -7,6 +7,7 @@
  * actually reads.
  */
 import type { AppConfig } from './generated/AppConfig'
+import type { DeviceEvent } from './generated/DeviceEvent'
 import type { InventoryUpdate } from './generated/InventoryUpdate'
 import type { LinkButtonStatus } from './generated/LinkButtonStatus'
 import type { Service } from './generated/Service'
@@ -37,6 +38,7 @@ export type Update
     | { ServiceUpdate: Service }
     | { Inventory: InventoryUpdate }
     | { LinkButton: LinkButtonStatus }
+    | { DeviceEvent: DeviceEvent }
 
 /**
  * One path of a draft conflict, resolved by the user.

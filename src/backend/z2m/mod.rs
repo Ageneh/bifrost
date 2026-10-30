@@ -40,6 +40,7 @@ use crate::backend::z2m::sensor::SensorKind;
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::config::Z2mServer;
 use crate::config_store::ConfigStore;
+use crate::device_events::DeviceEvents;
 use crate::error::{ApiError, ApiResult};
 use crate::inventory::{GroupRef, Inventory};
 use crate::resource::Resources;
@@ -148,6 +149,7 @@ impl ServiceTemplate for Z2mServiceTemplate {
         )
         .map_err(SvcError::generation)?
         .with_inventory(self.state.inventory())
+        .with_device_events(self.state.device_events())
         .with_streams(self.state.streams())
         .with_commands(self.state.backends());
 
@@ -187,6 +189,9 @@ pub struct Z2mBackend {
     /// Where what this backend learns is published. Absent in a unit test
     /// that drives the backend without one.
     inventory: Option<Arc<Inventory>>,
+    /// Where device reports are published, absent in a unit test that drives
+    /// the backend without one.
+    device_events: Option<Arc<DeviceEvents>>,
     /// Where the entertainment streams are counted, absent in a unit test
     /// that drives the backend without one.
     streams: Option<Arc<StreamRegistry>>,
@@ -243,6 +248,7 @@ impl Z2mBackend {
             message_tx,
             socket: None,
             inventory: None,
+            device_events: None,
             streams: None,
             commands: None,
             command_token: None,
@@ -257,6 +263,13 @@ impl Z2mBackend {
     #[must_use]
     pub fn with_inventory(mut self, inventory: Arc<Inventory>) -> Self {
         self.inventory = Some(inventory);
+        self
+    }
+
+    /// Publish what this backend's devices report into `events`.
+    #[must_use]
+    pub fn with_device_events(mut self, events: Arc<DeviceEvents>) -> Self {
+        self.device_events = Some(events);
         self
     }
 

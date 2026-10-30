@@ -156,6 +156,8 @@ impl WebSocketTask {
         let streams = self.state.streams();
         let mut stream_events = streams.subscribe();
 
+        let mut device_events = self.state.device_events().subscribe();
+
         let app_config = redacted_app_config(&self.state.config())?;
         self.send(Update::AppConfig(app_config)).await?;
 
@@ -185,6 +187,7 @@ impl WebSocketTask {
                 inventory_event = inventory_events.recv() => self.handle_inventory_event(inventory_event),
                 link_button_event = link_button_events.recv() => Ok(link_button_event.ok().map(Update::LinkButton)),
                 stream_event = stream_events.recv() => self.handle_stream_event(stream_event),
+                device_event = device_events.recv() => Ok(device_event.ok().map(Update::DeviceEvent)),
             };
 
             if let Some(reply) = reply? {

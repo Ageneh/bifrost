@@ -395,6 +395,11 @@ impl Z2mBackend {
         };
 
         if let Some(value) = value {
+            // the inventory holds the current state; the event is the change,
+            // and a screen that shows "21.4 °C at 14:02" needs the second
+            if let Some(events) = &self.device_events {
+                events.publish(&ieee, kind.property(), value.clone(), now);
+            }
             inventory.set_reading(&self.name, &ieee, kind.property(), value, now);
         }
     }
@@ -412,8 +417,14 @@ impl Z2mBackend {
 
         self.touch_device(name);
 
-        if let (Some(inventory), Some(ieee)) = (self.inventory(), self.device_ieee(name)) {
-            inventory.set_reading(&self.name, &ieee, "action", json!(action), Utc::now());
+        let at = Utc::now();
+        if let Some(ieee) = self.device_ieee(name) {
+            if let Some(events) = &self.device_events {
+                events.publish(&ieee, "action", json!(action), at);
+            }
+            if let Some(inventory) = self.inventory() {
+                inventory.set_reading(&self.name, &ieee, "action", json!(action), at);
+            }
         }
 
         if let Some(battery) = payload.get("battery").and_then(Value::as_f64) {

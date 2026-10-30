@@ -16,6 +16,7 @@ use crate::auth::{Auth, Clock, HashCost, SystemClock};
 use crate::backend::z2m::BackendCommands;
 use crate::config::AppConfig;
 use crate::config_store::ConfigStore;
+use crate::device_events::DeviceEvents;
 use crate::error::ApiResult;
 use crate::inventory::Inventory;
 use crate::model::state::{State, StateVersion};
@@ -181,6 +182,7 @@ pub struct AppState {
     auth: Arc<Auth>,
     pub res: Arc<Mutex<Resources>>,
     inventory: Arc<Inventory>,
+    device_events: Arc<DeviceEvents>,
     backends: Arc<BackendCommands>,
     link_button: Arc<LinkButtonState>,
     streams: Arc<StreamRegistry>,
@@ -262,6 +264,7 @@ impl AppState {
             auth,
             res,
             inventory: Inventory::new(),
+            device_events: DeviceEvents::new(),
             backends: Arc::new(BackendCommands::default()),
             link_button: Arc::new(LinkButtonState::new(clock)),
             streams: Arc::new(StreamRegistry::new()),
@@ -297,6 +300,12 @@ impl AppState {
     #[must_use]
     pub fn inventory(&self) -> Arc<Inventory> {
         self.inventory.clone()
+    }
+
+    /// The channel every device report is published to.
+    #[must_use]
+    pub fn device_events(&self) -> Arc<DeviceEvents> {
+        self.device_events.clone()
     }
 
     /// The command channels of the running z2m backends.
