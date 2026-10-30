@@ -1,0 +1,56 @@
+## Home Assistant
+
+Bifrost runs beside Home Assistant as an add-on, or as its own container on
+the same network. Either way it answers the Hue API, so Home Assistant's
+existing Hue integration is the client.
+
+### As an add-on
+
+The add-on is the upstream [bifrost-hassio](https://github.com/chrivers/bifrost-hassio)
+project. It is not part of this repository, and the parts Home Assistant
+requires of an add-on live there: the Ingress route, the watchdog, and the
+`/data` directory the configuration and state are written to. Bifrost itself
+only has to serve its UI behind a path prefix and trust the Supervisor's
+Ingress proxy, which it does:
+
+- `bifrost.auth.trust_ingress` makes a request carrying `X-Ingress-Path`
+  skip the Bifrost login, because Home Assistant has already authenticated
+  the user. Trust is decided by the connecting address, and only the
+  addresses in `bifrost.auth.trusted_cidrs` count (the Supervisor's Ingress
+  proxy, `172.30.32.2`, is the documented one).
+- The UI is built with relative asset paths and reads the prefix the server
+  injects, so it works at `/` and under `/api/hassio_ingress/<token>/`
+  without a rebuild.
+
+Ports the bridge listens on, and the defaults:
+
+| Port | Setting | Purpose |
+|---|---|---|
+| 80 | `bridge.http_port` | Hue API v1/v2 and the admin console |
+| 443 | `bridge.https_port` | the same over TLS, which the Sync box requires |
+| 2100/udp | `bridge.entm_port` | the entertainment stream (DTLS) |
+
+### As the Hue integration
+
+Point Home Assistant's Hue integration at the bridge's address and press the
+link button (or open the pairing window from the console) when it asks. The
+integration sees a Hue bridge: lights, rooms, scenes and grouped lights, with
+the names zigbee2mqtt already has.
+
+An entertainment zone is a Hue resource, not a Home Assistant entity. Home
+Assistant does not start or stop a stream; the TV or the Sync app does. What
+Home Assistant can do is everything else about the lights in the zone.
+
+### Behind the prefix
+
+The console's own client calls are relative to the document, and its socket
+URL is derived from the same base, so an add-on install needs no extra
+configuration. If Home Assistant is served over HTTPS, the socket upgrades to
+`wss` with it.
+
+### See also
+
+- [Entertainment](entertainment.md): zones and streaming.
+- [Ambilight and Hue](ambilight.md): the TV side.
+- [Configuration reference](config-reference.md): `trust_ingress`,
+  `trusted_cidrs` and the ports.

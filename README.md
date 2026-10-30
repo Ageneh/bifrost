@@ -140,6 +140,16 @@ Please choose one of the following installation methods:
 
 See [configuration reference](doc/config-reference.md).
 
+# Entertainment
+
+- [Entertainment](doc/entertainment.md): zones, positions, channels and how a
+  stream is matched to a zone.
+- [Ambilight and Hue](doc/ambilight.md): pairing a TV and laying out its zone.
+- [Home Assistant](doc/home-assistant.md): the bridge as an add-on, and as the
+  Hue integration's bridge.
+- [Hardware matrix](doc/hardware-matrix.md): what has been run on real
+  hardware, and the steps to run it.
+
 # Problems? Questions? Feedback?
 
 Please note: Bifrost is a very young project. Some things are incomplete, and/or
