@@ -11,7 +11,7 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use svc::manager::ServiceManager;
+use svc::manager::{ServiceManager, SvmClient};
 use svc::template::ServiceTemplate;
 use svc::traits::{BoxDynService, Service};
 
@@ -56,6 +56,8 @@ impl Service for Idle {
 
 struct Fixture {
     _dir: TempDir,
+    store: Arc<ConfigStore>,
+    svm: SvmClient,
     state: AppState,
 }
 
@@ -95,7 +97,12 @@ devices:
             .await
             .unwrap();
 
-        Self { _dir: dir, state }
+        Self {
+            _dir: dir,
+            store,
+            svm,
+            state,
+        }
     }
 
     /// The name of every Light in the resource store.
@@ -218,4 +225,50 @@ async fn a_room_override_places_a_device_the_groups_do_not() {
         children.contains(&device.rid),
         "the overridden device is not a child of the room: {children:?}"
     );
+}
+
+#[tokio::test]
+async fn an_override_added_by_apply_survives_the_restart_it_causes() {
+    let mock = MockZ2m::start_w05().await.unwrap();
+    let mut fixture = Fixture::start(mock.url(), "  {}\n").await;
+
+    fixture.wait_for_lights(|names| names.len() == 3).await;
+
+    // `devices` classifies as RestartBackend, so this is not a hot change
+    let mut config = fixture.store.active();
+    config.devices.insert(
+        "0x0017880100000002".into(),
+        bifrost::config::DeviceConfig {
+            name: Some("Hall renamed".into()),
+            ..bifrost::config::DeviceConfig::default()
+        },
+    );
+
+    let revision = fixture.store.revision();
+    fixture.store.set_draft(revision, config).unwrap();
+    let outcome = fixture.store.apply(revision + 1).unwrap();
+    assert_eq!(
+        outcome.plan.hot,
+        [bifrost::config::diff::ApplyAction::RestartBackend {
+            name: "server1".into()
+        }]
+    );
+
+    let factory = CoreIdleFactory {
+        z2m: AppServiceFactory::new(fixture.state.clone()),
+    };
+    service_registry::reconcile(
+        &fixture.store,
+        &mut fixture.svm,
+        &factory,
+        &outcome.plan.hot,
+    )
+    .await
+    .unwrap();
+    fixture.svm.wait_for_start("z2m@server1").await.unwrap();
+
+    let names = fixture
+        .wait_for_lights(|names| names.contains(&"Hall renamed".to_string()))
+        .await;
+    assert!(!names.contains(&"Hall lamp".to_string()), "{names:?}");
 }

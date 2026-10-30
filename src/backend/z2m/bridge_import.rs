@@ -67,7 +67,7 @@ impl Z2mBackend {
         self.rmap.insert(link_device, name.to_string());
         self.rmap.insert(link_light, name.to_string());
 
-        let mut light = Light::new(link_device, metadata);
+        let mut light = Light::new(link_device, metadata.clone());
 
         light.dimming = expose
             .feature("brightness")
@@ -150,6 +150,15 @@ impl Z2mBackend {
         res.aux_set(&link_light, AuxData::new().with_topic(name));
         res.add(&link_device, Resource::Device(dev))?;
         res.add(&link_light, Resource::Light(light))?;
+
+        // a light that is already known keeps its id, so a name override
+        // arrives as an update; adding it again would leave the old name
+        res.update(&link_light.rid, |known: &mut Light| {
+            known.metadata = metadata.clone();
+        })?;
+        res.update(&link_device.rid, |known: &mut hue::api::Device| {
+            known.metadata = metadata.clone().into();
+        })?;
         res.add(&link_enttm, Resource::Entertainment(enttm))?;
         res.add(&link_taurus, Resource::Taurus(taurus))?;
         res.add(&link_zigcon, Resource::ZigbeeConnectivity(zigcon))?;
@@ -357,7 +366,19 @@ impl Z2mBackend {
         // the admin API names a room by its group topic, which is the key
         // `rooms:` uses
         res.aux_set(&link_room, AuxData::new().with_topic(&topic));
-        res.add(&link_room, Resource::Room(room))?;
+
+        // a room that is already known keeps its id, so a rename or a
+        // changed membership is an update; adding it again would be a no-op
+        // and leave the old name in place
+        if res.get::<Room>(&link_room).is_ok() {
+            res.update(&link_room.rid, |known: &mut Room| {
+                known.metadata.clone_from(&room.metadata);
+                known.children.clone_from(&room.children);
+                known.services.clone_from(&room.services);
+            })?;
+        } else {
+            res.add(&link_room, Resource::Room(room))?;
+        }
 
         let glight = GroupedLight::new(link_room);
 
