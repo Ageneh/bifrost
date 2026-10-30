@@ -16,3 +16,4 @@
 /frontend/.data
 /frontend/playwright-report
 /frontend/test-results
+/frontend/dist
