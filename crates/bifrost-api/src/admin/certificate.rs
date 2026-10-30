@@ -7,9 +7,10 @@ use crate::error::BifrostResult;
 
 /// What the bridge's own certificate says.
 ///
-/// The panel is read-only. Regenerating invalidates every paired client, so
-/// the endpoint exists but no screen calls it until pairing can be repeated.
+/// Regenerating invalidates every paired client, so the screen offers it
+/// behind a confirmation that names that cost.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CertificateInfo {
     /// Subject common name, which is the bridge id.
     pub common_name: String,

@@ -59,6 +59,10 @@ pub struct ApiShortConfig {
     pub replacesbridgeid: Option<String>,
     pub starterkitid: String,
     pub swversion: String,
+    /// True while a pairing window is open. A real bridge reports its
+    /// physical button here; Bifrost reports the window the admin screen
+    /// opened in its place.
+    pub linkbutton: bool,
 }
 
 impl Default for ApiShortConfig {
@@ -75,6 +79,7 @@ impl Default for ApiShortConfig {
             replacesbridgeid: None,
             starterkitid: String::new(),
             swversion: crate::HUE_BRIDGE_V2_DEFAULT_SWVERSION.to_string(),
+            linkbutton: false,
         }
     }
 }
@@ -242,7 +247,6 @@ pub struct ApiConfig {
     pub short_config: ApiShortConfig,
     pub dhcp: bool,
     pub internetservices: ApiInternetServices,
-    pub linkbutton: bool,
     pub portalconnection: ConnectionState,
     pub portalservices: bool,
     pub portalstate: PortalState,
@@ -785,7 +789,6 @@ impl Default for ApiConfig {
             short_config: ApiShortConfig::default(),
             dhcp: true,
             internetservices: ApiInternetServices::default(),
-            linkbutton: Default::default(),
             portalconnection: ConnectionState::Disconnected,
             portalservices: true,
             portalstate: PortalState::default(),

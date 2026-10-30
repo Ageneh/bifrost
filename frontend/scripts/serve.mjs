@@ -198,6 +198,57 @@ const draft = {
   config: null,
 }
 
+/**
+ * The pairing window, as the real server keeps it: a deadline, and a read
+ * that compares it with the clock.
+ */
+const linkButton = { deadline: 0, window: 30 }
+
+/** The pairing log the screen shows, newest first. */
+function initialPairingRecords() {
+  return [
+    { devicetype: 'Hue Sync Box', at: '2026-10-30T09:30:00Z', accepted: true },
+    { devicetype: 'hue app#2.0.0#iPhone14,3', at: '2026-10-30T09:10:00Z', accepted: false },
+  ]
+}
+let pairingRecords = initialPairingRecords()
+
+/** What the certificate panel reads. */
+const CERTIFICATE = {
+  common_name: '001122fffe334455',
+  bridge_id: '001122fffe334455',
+  mac: '00:11:22:33:44:55',
+  not_before: '2017-01-01T00:00:00Z',
+  not_after: '2038-01-19T03:14:07Z',
+  serial: '001122fffe334455',
+  fingerprint: 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99',
+}
+
+/** What the state summary reads. */
+const STATE_SUMMARY = {
+  bridge_id: '001122fffe334455',
+  mac: '00:11:22:33:44:55',
+  name: 'Bifrost',
+  version: '1.0.0',
+  counts: {
+    lights: 3,
+    grouped_lights: 2,
+    rooms: 1,
+    devices: 5,
+    scenes: 2,
+    entertainment_configurations: 0,
+  },
+}
+
+function linkButtonStatus() {
+  const remaining = linkButton.deadline === 0 ? 0 : Math.ceil((linkButton.deadline - Date.now()) / 1000)
+  if (remaining <= 0) {
+    linkButton.deadline = 0
+    return { pressed: false, remaining_seconds: 0 }
+  }
+  return { pressed: true, remaining_seconds: remaining }
+}
+
 function initialDraftConfig() {
   const config = structuredClone(ACTIVE_CONFIG)
   config.rooms = { office: { name: 'Studio', icon: 'office' } }
@@ -482,6 +533,97 @@ async function handleApi(request, response, endpoint, search) {
     return send(response, 204, '')
   }
 
+  // ---- pairing ---------------------------------------------------------
+
+  if (endpoint === 'bridge/link-button') {
+    if (method === 'POST') {
+      const body = (await readJson(request)) ?? {}
+      const seconds = body.seconds ?? 30
+      if (seconds < 1 || seconds > 120) {
+        return send(
+          response,
+          422,
+          JSON.stringify({ error: 'Open the pairing window for 1 to 120 seconds', errors: [] }),
+        )
+      }
+      linkButton.window = seconds
+      linkButton.deadline = Date.now() + seconds * 1000
+      return sendJson(response, linkButtonStatus())
+    }
+    return sendJson(response, linkButtonStatus())
+  }
+
+  if (endpoint === 'bridge/pairing' && method === 'GET') {
+    return sendJson(response, {
+      mode: ACTIVE_CONFIG.pairing?.require_link_button ? 'required' : 'compat',
+      records: pairingRecords,
+    })
+  }
+
+  // ---- identity --------------------------------------------------------
+
+  if (endpoint === 'bridge/certificate' && method === 'GET') {
+    return sendJson(response, CERTIFICATE)
+  }
+
+  if (endpoint === 'bridge/certificate/regenerate' && method === 'POST') {
+    return sendJson(response, { ...CERTIFICATE, fingerprint: `${CERTIFICATE.fingerprint}FF` })
+  }
+
+  if (endpoint === 'bridge/identity/backup' && method === 'GET') {
+    return sendJson(response, {
+      version: 1,
+      bridge_id: CERTIFICATE.bridge_id,
+      certificate_pem: '-----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----\n',
+      paired_clients: pairingRecords,
+    })
+  }
+
+  if (endpoint === 'bridge/identity/mac' && method === 'POST') {
+    const body = (await readJson(request)) ?? {}
+    if (body.confirm !== CERTIFICATE.bridge_id) {
+      return send(
+        response,
+        422,
+        JSON.stringify({ error: `Type the bridge id (${CERTIFICATE.bridge_id}) to change the MAC address`, errors: [] }),
+      )
+    }
+    return sendJson(response, { mac: body.mac, bridge_id: '001122fffe334466', restart_required: true })
+  }
+
+  if (endpoint === 'bridge/identity/restore' && method === 'POST') {
+    const body = (await readJson(request)) ?? {}
+    if (!body.admin_password) {
+      return send(response, 403, JSON.stringify({ error: 'The admin password does not match', errors: [] }))
+    }
+    pairingRecords = body.bundle?.paired_clients ?? pairingRecords
+    return sendJson(response, {
+      bridge_id: body.bundle?.bridge_id ?? CERTIFICATE.bridge_id,
+      paired_clients: pairingRecords.length,
+      tokens_written: [],
+    })
+  }
+
+  if (endpoint === 'state/summary' && method === 'GET') {
+    return sendJson(response, STATE_SUMMARY)
+  }
+
+  if (endpoint === 'state/export' && method === 'GET') {
+    return send(response, 200, 'version: 1\nres: {}\n', 'application/yaml')
+  }
+
+  if (endpoint === 'state/reset' && method === 'POST') {
+    const body = (await readJson(request)) ?? {}
+    if (body.confirm !== STATE_SUMMARY.bridge_id) {
+      return send(
+        response,
+        422,
+        JSON.stringify({ error: `Type the bridge id (${STATE_SUMMARY.bridge_id}) to reset the state`, errors: [] }),
+      )
+    }
+    return sendJson(response, { ...STATE_SUMMARY, counts: { lights: 0, grouped_lights: 0, rooms: 0, devices: 2, scenes: 0, entertainment_configurations: 0 } })
+  }
+
   return send(response, 404, JSON.stringify({ error: 'not found', errors: [] }))
 }
 
@@ -505,6 +647,9 @@ const server = createServer(async (request, response) => {
   if (rest === '__reset' && request.method === 'POST') {
     setupMode = false
     wizard = { step: 'identity', values: {}, updated_at: null }
+    linkButton.deadline = 0
+    linkButton.window = 30
+    pairingRecords = initialPairingRecords()
     draft.config = initialDraftConfig()
     draft.revision = 3
     for (const room of ROOMS) {

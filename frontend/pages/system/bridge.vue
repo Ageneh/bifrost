@@ -10,6 +10,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AsyncState from '~/components/AsyncState.vue'
 import BridgeForm from '~/components/BridgeForm.vue'
+import IdentityPanel from '~/components/IdentityPanel.vue'
 import StatusPill from '~/components/StatusPill.vue'
 import SystemTabs from '~/components/SystemTabs.vue'
 import { useApi } from '~/composables/useApi'
@@ -159,6 +160,8 @@ async function reloadDraft(): Promise<void> {
             @save="save"
           />
         </div>
+
+        <IdentityPanel />
       </template>
     </AsyncState>
   </div>

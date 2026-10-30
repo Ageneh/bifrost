@@ -84,6 +84,9 @@ function cancel(): void {
         {{ message }}
       </p>
 
+      <!-- extra content before the typed confirmation, e.g. an impact list -->
+      <slot />
+
       <label
         v-if="requireText"
         class="fd-field"

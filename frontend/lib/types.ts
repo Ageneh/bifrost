@@ -8,6 +8,7 @@
  */
 import type { AppConfig } from './generated/AppConfig'
 import type { InventoryUpdate } from './generated/InventoryUpdate'
+import type { LinkButtonStatus } from './generated/LinkButtonStatus'
 import type { Service } from './generated/Service'
 
 /**
@@ -35,6 +36,7 @@ export type Update
     | { HueEvent: HueEventBlock }
     | { ServiceUpdate: Service }
     | { Inventory: InventoryUpdate }
+    | { LinkButton: LinkButtonStatus }
 
 /**
  * One path of a draft conflict, resolved by the user.

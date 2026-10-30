@@ -61,7 +61,8 @@ impl ApiV1Error {
                 | HueApiV1Error::InvalidValueForParameter
                 | HueApiV1Error::ParameterNotModifiable
                 | HueApiV1Error::TooManyItemsInList
-                | HueApiV1Error::PortalConnectionIsRequired,
+                | HueApiV1Error::PortalConnectionIsRequired
+                | HueApiV1Error::LinkButtonNotPressed,
             ) => StatusCode::OK,
 
             Self::HueApiV1(HueApiV1Error::BridgeInternalError) => StatusCode::INTERNAL_SERVER_ERROR,

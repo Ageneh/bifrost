@@ -241,6 +241,42 @@ pub fn generate_and_save(certpath: &Utf8Path, mac: MacAddress) -> ApiResult<()> 
     Ok(())
 }
 
+/// The certificate file verbatim: the private key, then the certificate.
+///
+/// Only the identity bundle reads this; nothing logs or displays it.
+#[allow(clippy::result_large_err)]
+pub fn read_pem(certpath: &Utf8Path) -> ApiResult<String> {
+    Ok(std::fs::read_to_string(certpath)?)
+}
+
+/// Replace the certificate file with `pem`, written as privately as a
+/// generated one.
+///
+/// Text that holds no certificate, or a certificate without its private key,
+/// is refused: a damaged bundle must not leave the bridge unable to serve
+/// HTTPS.
+#[allow(clippy::result_large_err)]
+pub fn save_pem(certpath: &Utf8Path, pem: &str) -> ApiResult<()> {
+    if extract_common_name(pem.as_bytes())?.is_none() {
+        return Err(ApiError::CertificateInvalid(certpath.to_owned()));
+    }
+
+    let key = rustls_pemfile::private_key(&mut BufReader::new(pem.as_bytes()))?;
+    if key.is_none() {
+        return Err(ApiError::CertificateInvalid(certpath.to_owned()));
+    }
+
+    let mut fd = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(PRIVATE_FILE_MODE)
+        .open(certpath)?;
+    fd.write_all(pem.as_bytes())?;
+    fd.sync_all()?;
+    Ok(())
+}
+
 pub fn check_certificate(certpath: &Utf8Path, mac: MacAddress) -> ApiResult<()> {
     let cn = extract_common_name(File::open(certpath)?)?;
     let id = hue::bridge_id(mac);

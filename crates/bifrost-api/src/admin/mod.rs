@@ -3,12 +3,18 @@
 pub mod auth;
 pub mod certificate;
 pub mod logs;
+pub mod pairing;
 pub mod rooms;
 pub mod state;
 pub mod z2m;
 
 pub use certificate::CertificateInfo;
 pub use logs::{LogList, LogRecord};
+pub use pairing::{
+    IdentityBundle, IdentityMacChange, IdentityMacChangeReply, IdentityPairingEntry,
+    IdentityRestore, IdentityRestoreReply, LinkButtonPress, LinkButtonStatus, PairingHistory,
+    PairingMode, PairingRecord,
+};
 pub use rooms::{RoomDevice, RoomEntry, RoomList, RoomScene, SceneRecallRequest};
 pub use state::{StateCounts, StateResetRequest, StateSummary};
 pub use z2m::{Z2mServerEntry, Z2mServerList, Z2mServerWrite};

@@ -39,9 +39,26 @@ async fn get_api_config(State(state): State<AppState>) -> Json<impl Serialize> {
     Json(state.api_short_config().await)
 }
 
-async fn post_api(bytes: Bytes) -> ApiV1Result<Json<impl Serialize>> {
+/// The v1 pairing call: a Hue client asks for a username.
+///
+/// With `pairing.require_link_button` off — the default, and what every
+/// existing install keeps — any client pairs at any time. With it on, a
+/// client pairs only while the admin screen holds a window open, and the
+/// pairing consumes that window: a second client in the same window is
+/// refused with error 101, as a real bridge refuses it.
+async fn post_api(
+    State(state): State<AppState>,
+    bytes: Bytes,
+) -> ApiV1Result<Json<impl Serialize>> {
     info!("post: {bytes:?}");
     let json: NewUser = serde_json::from_slice(&bytes)?;
+
+    let link = state.link_button();
+    if state.config().pairing.require_link_button && !link.take() {
+        link.record(&json.devicetype, false);
+        return Err(HueApiV1Error::LinkButtonNotPressed.into());
+    }
+    link.record(&json.devicetype, true);
 
     let res = NewUserReply {
         clientkey: if json.generateclientkey {
@@ -580,4 +597,158 @@ pub fn router() -> Router<AppState> {
             "/{user}/{rtype}/{id}/{key}",
             put(put_api_user_resource_id_path),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request};
+    use hyper::StatusCode;
+    use serde_json::{Value, json};
+    use svc::manager::ServiceManager;
+    use tower::ServiceExt;
+
+    use crate::config_store::ConfigStore;
+    use crate::routes::api::router;
+    use crate::server::appstate::AppState;
+    use crate::testutil::{MINIMAL_CONFIG, ManualClock, TempDir};
+
+    /// A configuration that demands an open window before a client pairs.
+    fn requiring_config() -> String {
+        format!("{MINIMAL_CONFIG}\npairing:\n  require_link_button: true\n")
+    }
+
+    async fn fixture(config: &str) -> (TempDir, Arc<ManualClock>, AppState, Router) {
+        let dir = TempDir::new();
+        let store = ConfigStore::load(&dir.write("config.yaml", config)).unwrap();
+        let (svm, _future) = ServiceManager::spawn();
+        let clock = ManualClock::new();
+        let state = AppState::from_store(Arc::new(store), svm)
+            .await
+            .unwrap()
+            .with_link_button_clock(clock.clone());
+        let router = router().with_state(state.clone());
+        (dir, clock, state, router)
+    }
+
+    async fn call(
+        router: &Router,
+        method: Method,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(body)
+            .unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    async fn pair(router: &Router) -> (StatusCode, Value) {
+        call(
+            router,
+            Method::POST,
+            "/",
+            Some(json!({"devicetype": "Hue Sync Box"})),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_default_config_pairs_without_a_window() {
+        let (_dir, _clock, _state, router) = fixture(MINIMAL_CONFIG).await;
+
+        let (status, body) = pair(&router).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body[0]["success"]["username"],
+            "01010101-0202-0303-0404-050505050505"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_short_config_reports_the_window_on_a_default_config() {
+        // the assertions run on the default configuration, where a pairing is
+        // never refused, so the window is only observable here
+        let (_dir, clock, state, router) = fixture(MINIMAL_CONFIG).await;
+
+        state.link_button().press(5);
+
+        let (_, body) = call(&router, Method::GET, "/config", None).await;
+        assert_eq!(body["linkbutton"], true);
+        let remaining = body["remaining_seconds"].as_u64();
+        assert!(
+            remaining.is_none(),
+            "the v1 config carries no countdown: {body}"
+        );
+
+        // still inside the window
+        clock.advance(chrono::TimeDelta::seconds(4));
+        let (_, body) = call(&router, Method::GET, "/config", None).await;
+        assert_eq!(body["linkbutton"], true);
+
+        // and past it
+        clock.advance(chrono::TimeDelta::seconds(2));
+        let (_, body) = call(&router, Method::GET, "/config", None).await;
+        assert_eq!(body["linkbutton"], false);
+    }
+
+    #[tokio::test]
+    async fn a_required_window_refuses_a_pairing_outside_it() {
+        let (_dir, _clock, _state, router) = fixture(&requiring_config()).await;
+
+        let (status, body) = pair(&router).await;
+
+        // a real bridge answers 200 with the error in the body
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body[0]["error"]["type"], 101);
+        assert_eq!(body[0]["error"]["description"], "link button not pressed");
+    }
+
+    #[tokio::test]
+    async fn a_pairing_inside_the_window_consumes_it() {
+        let (_dir, _clock, state, router) = fixture(&requiring_config()).await;
+        state.link_button().press(30);
+
+        let (_, body) = pair(&router).await;
+        assert_eq!(
+            body[0]["success"]["username"],
+            "01010101-0202-0303-0404-050505050505"
+        );
+
+        // the second client in the same window is refused, as a real bridge
+        // refuses it, and the history says so
+        let (_, body) = pair(&router).await;
+        assert_eq!(body[0]["error"]["type"], 101);
+
+        let history = state.link_button().history();
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].accepted, "newest first: the refused attempt");
+        assert!(history[1].accepted);
+        assert_eq!(history[0].devicetype, "Hue Sync Box");
+    }
+
+    #[tokio::test]
+    async fn a_window_closes_on_its_own_before_a_pairing() {
+        let (_dir, clock, state, router) = fixture(&requiring_config()).await;
+        state.link_button().press(5);
+
+        clock.advance(chrono::TimeDelta::seconds(6));
+
+        let (_, body) = pair(&router).await;
+        assert_eq!(body[0]["error"]["type"], 101);
+    }
 }

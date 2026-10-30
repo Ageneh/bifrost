@@ -33,6 +33,7 @@ use crate::config_store::{ConfigStoreError, Draft};
 use crate::error::ApiResult;
 use crate::routes::extractor::Json;
 use crate::server::appstate::AppState;
+use crate::server::certificate;
 use crate::service_registry::{self, AppServiceFactory};
 
 /// Time for the restart response to reach the client before services stop.
@@ -309,6 +310,19 @@ async fn apply(
     revision: u64,
 ) -> ConfigApiResult<ApplyResponse> {
     let outcome = state.store().apply(revision)?;
+
+    // the bridge id, the certificate's common name and the state's bridge
+    // resources are all derived from the MAC, so a new MAC reissues the
+    // certificate now; the resources are rebuilt at the next start, which is
+    // why the plan marks the change restart-required
+    if outcome.previous.bridge.mac != outcome.applied.bridge.mac {
+        let mac = outcome.applied.bridge.mac;
+        certificate::regenerate(&state.store().paths().cert, mac)
+            .map_err(|err| ConfigApiError::Internal(err.to_string()))?;
+        log::warn!(
+            "The bridge MAC changed; the certificate was reissued and the new identity applies at the next start"
+        );
+    }
 
     log::info!(
         "Applied configuration revision {}: {} change(s), {} restart(s) required",
@@ -716,6 +730,14 @@ mod tests {
 
         assert_eq!(body["plan"]["hot"], json!([]));
         assert_eq!(body["plan"]["restart_required"][0]["path"], "bridge.mac");
+
+        // the certificate is reissued for the new MAC at apply time, so the
+        // HTTPS listener that comes back up serves the new identity
+        let cert = fixture.state.store().paths().cert.clone();
+        let cn =
+            crate::server::certificate::extract_common_name(std::fs::File::open(cert).unwrap())
+                .unwrap();
+        assert_eq!(cn.as_deref(), Some("001122fffe334466"));
     }
 
     #[tokio::test]

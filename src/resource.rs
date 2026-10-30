@@ -284,6 +284,42 @@ impl Resources {
         Ok(())
     }
 
+    /// The bridge id the state's bridge resource carries, if it has one.
+    #[must_use]
+    pub fn bridge_id(&self) -> Option<String> {
+        self.get_resources_by_type(RType::Bridge)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                Resource::Bridge(bridge) => Some(bridge.bridge_id),
+                _ => None,
+            })
+    }
+
+    /// Rebuild the bridge resources for `bridge_id`, keeping everything else.
+    ///
+    /// The bridge id is the MAC address, so changing the MAC makes every
+    /// resource derived from the old one stale: the bridge, its home, and the
+    /// services hanging off them. They are removed and added again under the
+    /// new id; rooms, scenes and imported devices are untouched.
+    #[allow(clippy::result_large_err)]
+    pub fn adopt_bridge_id(&mut self, bridge_id: &str) -> ApiResult<()> {
+        let Some(old) = self.bridge_id() else {
+            return self.init(bridge_id);
+        };
+        if old == bridge_id {
+            return Ok(());
+        }
+
+        for link in bridge_links(&old) {
+            // a state written by an older version may not hold every one
+            let _ = self.delete(&link);
+        }
+
+        self.init(bridge_id)?;
+        self.state_updates.notify_one();
+        Ok(())
+    }
+
     pub fn add_bridge(&mut self, bridge_id: String) -> ApiResult<()> {
         let link_bridge = RType::Bridge.deterministic(&bridge_id);
         let link_bridge_home = RType::BridgeHome.deterministic(format!("{bridge_id}HOME"));
@@ -611,4 +647,24 @@ impl Resources {
 
         Ok(())
     }
+}
+
+/// Every resource [`Resources::add_bridge`] creates for `bridge_id`.
+///
+/// The list is the one `add_bridge` builds, in the same order, so a bridge
+/// identity can be removed and rebuilt without touching anything else.
+fn bridge_links(bridge_id: &str) -> Vec<ResourceLink> {
+    let link_bridge = RType::Bridge.deterministic(bridge_id);
+    let link_bridge_home = RType::BridgeHome.deterministic(format!("{bridge_id}HOME"));
+
+    vec![
+        link_bridge,
+        link_bridge_home,
+        RType::Device.deterministic(link_bridge.rid),
+        RType::Device.deterministic(link_bridge_home.rid),
+        RType::Entertainment.deterministic(link_bridge.rid),
+        RType::ZigbeeDeviceDiscovery.deterministic(link_bridge.rid),
+        RType::ZigbeeConnectivity.deterministic(link_bridge.rid),
+        RType::GroupedLight.deterministic(link_bridge_home.rid),
+    ]
 }
