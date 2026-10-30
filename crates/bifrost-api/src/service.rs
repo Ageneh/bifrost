@@ -10,13 +10,17 @@ use crate::Client;
 use crate::error::BifrostResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Service {
     pub id: Uuid,
+    /// `name@instance`, as the service manager prints it.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub name: ServiceName,
     pub state: ServiceState,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ServiceList {
     pub services: BTreeMap<Uuid, Service>,
 }

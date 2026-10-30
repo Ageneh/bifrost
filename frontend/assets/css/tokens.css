@@ -1,0 +1,63 @@
+/*
+ * Flight Deck tokens. Every colour, size and radius the UI uses is named
+ * here; components never carry a raw hex value. Dark only: the console is
+ * read in a dark room next to a TV.
+ */
+:root {
+  color-scheme: dark;
+  --fd-bg: #08090b;
+  --fd-surface-1: #121417;
+  --fd-surface-2: #1b1e22;
+  --fd-surface-3: #262a2f;
+  --fd-surface-4: #32373d;
+  --fd-line: rgba(255, 255, 255, 0.07);
+  --fd-line-strong: rgba(255, 255, 255, 0.14);
+  --fd-text: #eceff3;
+  --fd-text-2: #98a1ab;
+  --fd-text-3: #646c75;
+  --fd-text-on-accent: #fff;
+  --fd-accent: #2f7cf6;
+  --fd-accent-hover: #4a8ff8;
+  --fd-accent-press: #1f66d8;
+  --fd-accent-soft: rgba(47, 124, 246, 0.14);
+  --fd-accent-line: rgba(47, 124, 246, 0.5);
+  --fd-accent-text: #cfe0ff;
+  --fd-ok: #35c77b;
+  --fd-warn: #e9a13b;
+  --fd-crit: #e5484d;
+  --fd-ok-soft: rgba(53, 199, 123, 0.14);
+  --fd-warn-soft: rgba(233, 161, 59, 0.14);
+  --fd-crit-soft: rgba(229, 72, 77, 0.14);
+  --fd-crit-text: #ff9ea1;
+  --fd-font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --fd-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --fd-size-micro: 10px;
+  --fd-size-meta: 11px;
+  --fd-size-sm: 12px;
+  --fd-size-body: 13px;
+  --fd-size-value: 15px;
+  --fd-size-title: 17px;
+  --fd-size-display: 24px;
+  --fd-track-micro: 0.09em;
+  --fd-leading-tight: 1.2;
+  --fd-leading: 1.5;
+  --fd-r-panel: 20px;
+  --fd-r-card: 14px;
+  --fd-r-control: 10px;
+  --fd-r-inset: 8px;
+  --fd-r-pill: 999px;
+  --fd-1: 4px;
+  --fd-2: 8px;
+  --fd-3: 12px;
+  --fd-4: 16px;
+  --fd-5: 20px;
+  --fd-6: 24px;
+  --fd-8: 32px;
+  --fd-10: 40px;
+  --fd-shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 32px -14px rgba(0, 0, 0, 0.9);
+  --fd-shadow-pop: 0 18px 44px -12px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --fd-focus-ring: 0 0 0 2px var(--fd-bg), 0 0 0 4px var(--fd-accent-line);
+  --fd-fast: 110ms cubic-bezier(0.2, 0, 0.2, 1);
+  --fd-med: 180ms cubic-bezier(0.2, 0, 0.2, 1);
+}

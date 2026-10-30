@@ -55,6 +55,7 @@ Transition diagram for [`ServiceState`]:
 */
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum ServiceState {
     /// Service is registered with the service manager, but not configured yet
     Registered,

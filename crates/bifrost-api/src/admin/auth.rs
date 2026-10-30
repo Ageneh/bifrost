@@ -16,6 +16,7 @@ const HIDDEN: &str = "<<REDACTED>>";
 
 /// How the current request is authenticated.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SessionResponse {
     /// The request may use the admin API.
     pub authenticated: bool,
@@ -31,12 +32,14 @@ pub struct SessionResponse {
 
 /// Log in with the admin password.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LoginRequest {
     pub password: String,
 }
 
 /// Set the first admin password.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SetupRequest {
     /// The setup code Bifrost printed to its console at startup. Not needed
     /// through Home Assistant Ingress.
@@ -47,6 +50,7 @@ pub struct SetupRequest {
 
 /// Change the admin password. Every other session is logged out.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PasswordChange {
     pub current_password: String,
     pub new_password: String,
@@ -54,6 +58,7 @@ pub struct PasswordChange {
 
 /// End the current session, or every session with `all`.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LogoutRequest {
     #[serde(default)]
     pub all: bool,

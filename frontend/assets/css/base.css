@@ -1,0 +1,68 @@
+/* Page defaults. Everything colour- or size-bearing comes from tokens.css. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+body {
+  background: var(--fd-bg);
+  color: var(--fd-text);
+  font-family: var(--fd-font);
+  font-size: var(--fd-size-body);
+  line-height: var(--fd-leading);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+#__nuxt {
+  height: 100%;
+}
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+p {
+  margin: 0;
+}
+a {
+  color: var(--fd-accent);
+  text-decoration: none;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button,
+a,
+input,
+select,
+summary,
+[tabindex] {
+  outline: none;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  box-shadow: var(--fd-focus-ring);
+}
+code,
+.mono {
+  font-family: var(--fd-font-mono);
+  font-size: var(--fd-size-meta);
+  color: var(--fd-text-3);
+}
