@@ -65,7 +65,7 @@ test.describe('home, the doctor', () => {
     await page.goto('')
 
     await expect(page.getByTestId('home-health-bridge')).toContainText('reachable')
-    await expect(page.getByTestId('home-health-services')).toContainText('2 of 3 running')
+    await expect(page.getByTestId('home-health-services')).toContainText('3 of 4 running')
     await expect(page.getByTestId('home-health-z2m')).toContainText('1 of 2 connected')
     await expect(page.getByTestId('home-health-draft')).toContainText('1 change')
     await expect(page.getByTestId('home-health-restart')).toContainText('not required')

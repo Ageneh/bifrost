@@ -72,6 +72,69 @@ pub struct EntertainmentConfigurationSummary {
     pub lights: Vec<Uuid>,
 }
 
+/// One zone, as the editor reads it.
+///
+/// The channel list is derived on the server from the members and their
+/// positions, so the editor never edits channels: it moves positions and the
+/// channels follow.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentZone {
+    pub id: Uuid,
+    pub name: String,
+    /// `screen`, `monitor`, `music`, `3dspace` or `other`.
+    pub configuration_type: String,
+    /// `active` while it streams, `inactive` otherwise.
+    pub status: String,
+    /// The app streaming into this zone, while one is.
+    pub active_streamer: Option<Uuid>,
+    /// One entry per service the zone names, with its positions.
+    pub locations: Vec<EntertainmentZoneLocation>,
+    /// One entry per channel, in channel order.
+    pub channels: Vec<EntertainmentZoneChannel>,
+}
+
+/// A service the zone names, and where its segments sit.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentZoneLocation {
+    /// The entertainment service, which is what a zone names.
+    pub service: Uuid,
+    /// One position per segment, in the order the device addresses them.
+    pub positions: Vec<EntertainmentPosition>,
+}
+
+/// One channel: a colour in every frame, and where it belongs.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentZoneChannel {
+    pub channel_id: u32,
+    pub position: EntertainmentPosition,
+    pub members: Vec<EntertainmentZoneMember>,
+}
+
+/// One segment of one service, as a channel addresses it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentZoneMember {
+    /// The entertainment service the segment belongs to.
+    pub service: Uuid,
+    /// The segment's index on that device.
+    pub index: u16,
+}
+
+/// A point in the Hue coordinate system.
+///
+/// `x` runs left to right, `y` bottom to top, `z` front to back, with the
+/// origin at the centre of the screen.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntertainmentPosition {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
 /// What every stream is doing, as the diagnostics screen reads it.
 ///
 /// The screen asks once a second; nothing here changes per frame.

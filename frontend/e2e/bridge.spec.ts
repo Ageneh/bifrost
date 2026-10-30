@@ -48,12 +48,12 @@ test.describe('system · bridge and network', () => {
     await expect(page.getByTestId('config-field-bridge-http-port-blast')).toHaveText('· restart')
     await expect(page.getByTestId('config-field-bridge-mac-blast')).toHaveText('· restart required')
 
-    // System is a live mode now; Devices and Rooms have had their screens
-    // since waves 4 and 5, and the modes still without one say so
+    // System is a live mode now; Devices, Rooms and Entertainment have had
+    // their screens since waves 4, 5 and 8
     await expect(page.getByTestId('nav-system')).toHaveAttribute('data-state', 'active')
     await expect(page.getByTestId('nav-devices')).toHaveAttribute('data-state', 'idle')
     await expect(page.getByTestId('nav-rooms')).toHaveAttribute('data-state', 'idle')
-    await expect(page.getByTestId('nav-entertainment')).toHaveAttribute('data-state', 'pending')
+    await expect(page.getByTestId('nav-entertainment')).toHaveAttribute('data-state', 'idle')
 
     // the tab set keeps the screens this wave does not build visible, disabled
     await expect(page.getByTestId('system-tabs')).toBeVisible()

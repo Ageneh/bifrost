@@ -15,7 +15,8 @@ use uuid::Uuid;
 use bifrost_api::backend::BackendRequest;
 use bifrost_api::entertainment::{
     EntertainmentCapabilities, EntertainmentConfigurationSummary, EntertainmentDevice,
-    EntertainmentStatus,
+    EntertainmentPosition, EntertainmentStatus, EntertainmentZone, EntertainmentZoneChannel,
+    EntertainmentZoneLocation, EntertainmentZoneMember,
 };
 
 use crate::routes::bifrost::{BifrostApiResult, not_found};
@@ -143,9 +144,81 @@ async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> BifrostA
     Ok(Json(Value::Null).into_response())
 }
 
+/// One zone, with its positions and its derived channels.
+///
+/// The editor reads this rather than the CLIP resource: the same numbers, in
+/// the shape the screen needs, behind the admin session like every other
+/// read here.
+async fn configuration(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> BifrostApiResult<Response> {
+    let Ok(zone) = id.parse::<Uuid>() else {
+        return Ok(not_found().await);
+    };
+
+    let res = state.res.lock().await;
+    let Ok(ec) = res.get_id::<EntertainmentConfiguration>(zone) else {
+        return Ok(not_found().await);
+    };
+
+    let locations = ec
+        .locations
+        .service_locations
+        .iter()
+        .map(|location| EntertainmentZoneLocation {
+            service: location.service.rid,
+            positions: location.positions.iter().map(position_of).collect(),
+        })
+        .collect();
+
+    let channels = ec
+        .channels
+        .iter()
+        .map(|channel| EntertainmentZoneChannel {
+            channel_id: channel.channel_id,
+            position: position_of(&channel.position),
+            members: channel
+                .members
+                .iter()
+                .map(|member| EntertainmentZoneMember {
+                    service: member.service.rid,
+                    index: member.index,
+                })
+                .collect(),
+        })
+        .collect();
+
+    Ok(Json(EntertainmentZone {
+        id: zone,
+        name: ec.metadata.name.clone(),
+        configuration_type: serde_json::to_value(&ec.configuration_type)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        status: serde_json::to_value(&ec.status)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        active_streamer: ec.active_streamer.map(|link| link.rid),
+        locations,
+        channels,
+    })
+    .into_response())
+}
+
+fn position_of(position: &hue::api::Position) -> EntertainmentPosition {
+    EntertainmentPosition {
+        x: position.x,
+        y: position.y,
+        z: position.z,
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/capabilities", get(capabilities))
         .route("/status", get(status))
+        .route("/configurations/{id}", get(configuration))
         .route("/{id}/stop", post(stop))
 }

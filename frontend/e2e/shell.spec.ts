@@ -48,9 +48,8 @@ test.describe('the console shell at 390 px', () => {
       await expect(page.getByTestId(`nav-${key}`)).toBeVisible()
     }
 
-    // a lazy route chunk loads through the relative asset base; Devices has
-    // had its screen since wave 4 and Rooms since wave 5, and the modes
-    // after them still say pending
+    // a lazy route chunk loads through the relative asset base; every mode
+    // the programme has reached answers with its own screen
     await page.getByTestId('nav-devices').click()
     await expect(page.getByTestId('device-table')).toBeVisible()
 
@@ -58,8 +57,7 @@ test.describe('the console shell at 390 px', () => {
     await expect(page.getByTestId('rooms-list')).toBeVisible()
 
     await page.getByTestId('nav-entertainment').click()
-    await expect(page.getByTestId('pending-screen')).toBeVisible()
-    await expect(page.getByTestId('pending-screen')).toContainText('Entertainment')
+    await expect(page.getByTestId('entertainment-home')).toBeVisible()
   })
 
   test('shows the draft pill and hides the status-column bar', async ({ page }) => {

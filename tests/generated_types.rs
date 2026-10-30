@@ -32,7 +32,8 @@ use bifrost_api::config::{
 };
 use bifrost_api::entertainment::{
     EntertainmentCapabilities, EntertainmentConfigurationSummary, EntertainmentDevice,
-    EntertainmentStatus, StreamStats,
+    EntertainmentPosition, EntertainmentStatus, EntertainmentZone, EntertainmentZoneChannel,
+    EntertainmentZoneLocation, EntertainmentZoneMember, StreamStats,
 };
 use bifrost_api::inventory::{
     Availability, Capabilities, DeviceInfo, DeviceType, ExposeSummary, GroupRef, IdentifyRequest,
@@ -136,6 +137,11 @@ fn export_typescript_bindings() {
     EntertainmentDevice::export_all(&cfg).unwrap();
     EntertainmentStatus::export_all(&cfg).unwrap();
     StreamStats::export_all(&cfg).unwrap();
+    EntertainmentZone::export_all(&cfg).unwrap();
+    EntertainmentZoneLocation::export_all(&cfg).unwrap();
+    EntertainmentZoneChannel::export_all(&cfg).unwrap();
+    EntertainmentZoneMember::export_all(&cfg).unwrap();
+    EntertainmentPosition::export_all(&cfg).unwrap();
 
     LinkButtonStatus::export_all(&cfg).unwrap();
     LinkButtonPress::export_all(&cfg).unwrap();

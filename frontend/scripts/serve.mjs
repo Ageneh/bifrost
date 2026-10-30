@@ -113,10 +113,18 @@ const DEVICES = [
   device('office', '0x0017880100000001', 'Kitchen ceiling', 'light', true, {
     room: { rid: 'room-kitchen', name: 'Kitchen' },
     group: { id: 1, name: 'Kitchen' },
+    resources: [
+      { rid: 'device-0x0017880100000001', rtype: 'device' },
+      { rid: 'light-a1', rtype: 'light' },
+    ],
   }),
   // in a group but in no room: the chain breaks at the room hop
   device('office', '0x0017880100000002', 'Hall lamp', 'light', true, {
     group: { id: 2, name: 'Hall' },
+    resources: [
+      { rid: 'device-0x0017880100000002', rtype: 'device' },
+      { rid: 'light-a2', rtype: 'light' },
+    ],
   }),
   device('office', '0x00158d0000000010', 'Desk plug', 'plug', false),
   device('office', '0x00158d0000000050', 'Back door', 'contact', false),
@@ -172,6 +180,11 @@ const SERVICES = {
       name: 'http',
       state: 'Running',
     },
+    '44444444-4444-4444-8444-444444444444': {
+      id: '44444444-4444-4444-8444-444444444444',
+      name: 'https',
+      state: 'Running',
+    },
     '22222222-2222-4222-8222-222222222222': {
       id: '22222222-2222-4222-8222-222222222222',
       name: 'z2m@office',
@@ -193,10 +206,78 @@ const SERVICES = {
  * once. A stop removes one row and leaves the other, and `__reset` puts both
  * back.
  */
-const ZONES = [
-  { id: '2f1c4f1e-0000-4000-8000-000000000001', name: 'Living room TV', type: 'screen', channels: 3 },
-  { id: '2f1c4f1e-0000-4000-8000-000000000002', name: 'Desk monitor', type: 'monitor', channels: 2 },
+const ZONE_DEVICES = [
+  { id: '2f1c4f1e-0000-4000-8000-0000000000a1', name: 'TV left', segments: 1, light: 'light-a1' },
+  { id: '2f1c4f1e-0000-4000-8000-0000000000a2', name: 'TV right', segments: 1, light: 'light-a2' },
+  // not in the inventory: the canvas draws it hollow, which is the offline case
+  { id: '2f1c4f1e-0000-4000-8000-0000000000a3', name: 'Desk light', segments: 1, light: 'light-a3' },
+  // in no zone: the free light a recipe can take
+  { id: '2f1c4f1e-0000-4000-8000-0000000000a4', name: 'Studio light', segments: 1, light: 'light-a4' },
 ]
+
+/**
+ * The default layout, the same rule the server applies: the segments spread
+ * evenly along the top edge, left to right.
+ */
+function autoLayout(segments) {
+  const round = value => Math.round(value * 1000) / 1000
+  if (segments <= 0) {
+    return []
+  }
+  if (segments === 1) {
+    return [{ x: 0, y: 0.8, z: 0.4 }]
+  }
+  const step = 0.8 / (segments - 1)
+  return Array.from({ length: segments }, (_, index) => ({
+    x: round(-0.4 + step * index),
+    y: 0.8,
+    z: 0.4,
+  }))
+}
+
+/** The channels a zone's locations derive, in channel order. */
+function channelsOf(zone) {
+  const channels = []
+  let id = 0
+  for (const location of zone.locations) {
+    const device = ZONE_DEVICES.find(entry => entry.id === location.service)
+    const count = Math.max(device?.segments ?? 1, 1)
+    const positions = location.positions.length > 0 ? location.positions : autoLayout(count)
+    for (let index = 0; index < count; index += 1) {
+      channels.push({
+        channel_id: id,
+        position: positions[index] ?? positions[0] ?? { x: 0, y: 0, z: 0 },
+        members: [{ service: location.service, index }],
+      })
+      id += 1
+    }
+  }
+  return channels
+}
+
+const INITIAL_ZONES = [
+  {
+    id: '2f1c4f1e-0000-4000-8000-000000000001',
+    name: 'Living room TV',
+    type: 'screen',
+    status: 'active',
+    locations: [
+      { service: ZONE_DEVICES[0].id, positions: [{ x: -0.4, y: 0.8, z: 0.4 }] },
+      { service: ZONE_DEVICES[1].id, positions: [{ x: 0.4, y: 0.8, z: 0.4 }] },
+    ],
+  },
+  {
+    id: '2f1c4f1e-0000-4000-8000-000000000002',
+    name: 'Desk monitor',
+    type: 'monitor',
+    status: 'active',
+    locations: [
+      { service: '2f1c4f1e-0000-4000-8000-0000000000a3', positions: [{ x: 0, y: 0.8, z: 0.4 }] },
+    ],
+  },
+]
+
+let ZONES = structuredClone(INITIAL_ZONES)
 
 function initialStreams() {
   return [
@@ -216,7 +297,9 @@ function initialStreams() {
       fps_out: 20,
       frames: 3_600,
       drops: 1_200,
-      last_error: null,
+      // a session that ended badly stays listed with its reason, which is
+      // what the diagnostics panel exists to show
+      last_error: 'Timeout while waiting for sync data',
     },
   ]
 }
@@ -646,23 +729,39 @@ async function handleApi(request, response, endpoint, search) {
   if (endpoint === 'entertainment/capabilities' && method === 'GET') {
     return sendJson(response, {
       max_streams: 2,
-      devices: [
-        { id: '2f1c4f1e-0000-4000-8000-0000000000a1', name: 'TV left', segments: 7, configurable: false, light: null },
-        { id: '2f1c4f1e-0000-4000-8000-0000000000a2', name: 'TV right', segments: 7, configurable: false, light: null },
-      ],
+      devices: ZONE_DEVICES.map(device => ({ ...device, configurable: false })),
       configurations: ZONES.map(zone => ({
         id: zone.id,
         name: zone.name,
         configuration_type: zone.type,
-        status: 'active',
-        channels: zone.channels,
-        lights: [],
+        status: zone.status,
+        channels: channelsOf(zone).length,
+        lights: zone.locations
+          .map(location => ZONE_DEVICES.find(device => device.id === location.service)?.light)
+          .filter(light => light !== undefined),
       })),
     })
   }
 
   if (endpoint === 'entertainment/status' && method === 'GET') {
     return sendJson(response, { max_streams: 2, streams })
+  }
+
+  if (endpoint.startsWith('entertainment/configurations/') && method === 'GET') {
+    const id = decodeURIComponent(endpoint.slice('entertainment/configurations/'.length))
+    const zone = ZONES.find(entry => entry.id === id)
+    if (zone === undefined) {
+      return send(response, 404, JSON.stringify({ error: 'No such zone', errors: [] }))
+    }
+    return sendJson(response, {
+      id: zone.id,
+      name: zone.name,
+      configuration_type: zone.type,
+      status: zone.status,
+      active_streamer: streams.some(stream => stream.area === zone.id) ? 'fixture-app' : null,
+      locations: zone.locations,
+      channels: channelsOf(zone),
+    })
   }
 
   if (endpoint.startsWith('entertainment/') && endpoint.endsWith('/stop') && method === 'POST') {
@@ -697,6 +796,52 @@ async function handleApi(request, response, endpoint, search) {
   return send(response, 404, JSON.stringify({ error: 'not found', errors: [] }))
 }
 
+/**
+ * The CLIP v2 surface the editor writes through.
+ *
+ * Only entertainment configurations: creating one and moving its lights.
+ * The answer shapes are the Rust ones — a `{data, errors}` envelope — so the
+ * client cannot tell this apart from the bridge.
+ */
+async function handleClip(request, response, path) {
+  const method = request.method ?? 'GET'
+
+  if (path === 'resource/entertainment_configuration' && method === 'POST') {
+    const body = (await readJson(request)) ?? {}
+    const id = `2f1c4f1e-0000-4000-8000-${String(Date.now()).padStart(12, '0').slice(-12)}`
+    ZONES.push({
+      id,
+      name: body.metadata?.name ?? 'Zone',
+      type: body.configuration_type ?? 'screen',
+      status: 'inactive',
+      locations: (body.locations?.service_locations ?? []).map(location => ({
+        service: location.service.rid,
+        positions: location.positions ?? [],
+      })),
+    })
+    return sendJson(response, { data: [{ rid: id, rtype: 'entertainment_configuration' }], errors: [] })
+  }
+
+  const put = path.match(/^resource\/entertainment_configuration\/([^/]+)$/)
+  if (put && method === 'PUT') {
+    const id = decodeURIComponent(put[1])
+    const zone = ZONES.find(entry => entry.id === id)
+    if (zone === undefined) {
+      return send(response, 404, JSON.stringify({ data: [], errors: [{ description: 'No such zone' }] }))
+    }
+    const body = (await readJson(request)) ?? {}
+    if (body.locations?.service_locations !== undefined) {
+      zone.locations = body.locations.service_locations.map(location => ({
+        service: location.service.rid,
+        positions: location.positions ?? [],
+      }))
+    }
+    return sendJson(response, { data: [{ rid: id, rtype: 'entertainment_configuration' }], errors: [] })
+  }
+
+  return send(response, 404, JSON.stringify({ data: [], errors: [{ description: 'not found' }] }))
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
   const path = url.pathname
@@ -721,6 +866,7 @@ const server = createServer(async (request, response) => {
     linkButton.window = 30
     pairingRecords = initialPairingRecords()
     streams = initialStreams()
+    ZONES = structuredClone(INITIAL_ZONES)
     draft.config = initialDraftConfig()
     draft.revision = 3
     for (const room of ROOMS) {
@@ -739,6 +885,15 @@ const server = createServer(async (request, response) => {
     draft.config = null
     draft.revision = 0
     return send(response, 204, '')
+  }
+
+  if (rest.startsWith('clip/v2/')) {
+    try {
+      return await handleClip(request, response, rest.slice('clip/v2/'.length).replace(/\/+$/, ''))
+    }
+    catch (error) {
+      return send(response, 500, JSON.stringify({ data: [], errors: [{ description: String(error) }] }))
+    }
   }
 
   if (rest.startsWith('bifrost/')) {
