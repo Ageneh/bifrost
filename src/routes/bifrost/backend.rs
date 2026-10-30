@@ -19,7 +19,7 @@ async fn post_backend_z2m(
 
     let mut mgr = state.manager();
 
-    let svc = Z2mBackend::new(name.clone(), server, state.config(), state.res.clone())?;
+    let svc = Z2mBackend::new(name.clone(), server, state.store(), state.res.clone())?;
     let name = format!("z2m-{name}");
 
     mgr.register_service(&name, svc).await?;

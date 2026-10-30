@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use crate::config::Z2mServer;
+use crate::config::{AppConfig, Z2mServer};
 
 /// Keys whose values are secrets, wherever they appear in the document.
 pub const SECRET_KEYS: &[&str] = &["token", "password", "password_hash"];
@@ -52,6 +52,18 @@ pub fn redacted(value: &Value) -> Value {
     let mut copy = value.clone();
     redact(&mut copy);
     copy
+}
+
+/// `config` as a redacted document, safe to hand out.
+pub fn redacted_config(config: &AppConfig) -> serde_json::Result<Value> {
+    let mut value = serde_json::to_value(config)?;
+    redact(&mut value);
+    Ok(value)
+}
+
+/// A redacted copy of `config`, for interfaces typed as [`AppConfig`].
+pub fn redacted_app_config(config: &AppConfig) -> serde_json::Result<AppConfig> {
+    serde_json::from_value(redacted_config(config)?)
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use bifrost_api::websocket::Update;
 use hue::event::EventBlock;
 use svc::manager::{ServiceEvent, SvmClient};
 
+use crate::config::redact::redacted_app_config;
 use crate::routes::bifrost::BifrostApiResult;
 use crate::server::appstate::AppState;
 use crate::server::hueevents::HueEventRecord;
@@ -86,8 +87,8 @@ impl WebSocketTask {
 
         let mut svc_events = self.mgr.subscribe().await?.1;
 
-        let app_config = self.state.config();
-        self.send(Update::AppConfig((*app_config).clone())).await?;
+        let app_config = redacted_app_config(&self.state.config())?;
+        self.send(Update::AppConfig(app_config)).await?;
 
         self.send(Update::HueEvent(EventBlock::add(hue_state)))
             .await?;

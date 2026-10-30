@@ -32,7 +32,8 @@ use z2m::update::DeviceUpdate;
 use crate::backend::z2m::entertainment::EntStream;
 use crate::backend::z2m::learn::SceneLearn;
 use crate::backend::z2m::websocket::Z2mWebSocket;
-use crate::config::{AppConfig, Z2mServer};
+use crate::config::Z2mServer;
+use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
 use crate::model::throttle::Throttle;
 use crate::resource::Resources;
@@ -61,8 +62,13 @@ impl ServiceTemplate for Z2mServiceTemplate {
         let Some(server) = config.z2m.servers.get(&name) else {
             return Err(SvcError::generation(TemplateError::NotFound(name)));
         };
-        let svc = Z2mBackend::new(name, server.clone(), config, self.state.res.clone())
-            .map_err(SvcError::generation)?;
+        let svc = Z2mBackend::new(
+            name,
+            server.clone(),
+            self.state.store(),
+            self.state.res.clone(),
+        )
+        .map_err(SvcError::generation)?;
 
         Ok(svc.boxed())
     }
@@ -71,7 +77,7 @@ impl ServiceTemplate for Z2mServiceTemplate {
 pub struct Z2mBackend {
     name: String,
     server: Z2mServer,
-    config: Arc<AppConfig>,
+    store: Arc<ConfigStore>,
     state: Arc<Mutex<Resources>>,
     map: HashMap<String, ResourceLink>,
     rmap: HashMap<ResourceLink, String>,
@@ -96,7 +102,7 @@ impl Z2mBackend {
     pub fn new(
         name: String,
         server: Z2mServer,
-        config: Arc<AppConfig>,
+        store: Arc<ConfigStore>,
         state: Arc<Mutex<Resources>>,
     ) -> ApiResult<Self> {
         let fps = server.streaming_fps.map_or(Self::DEFAULT_FPS, u32::from);
@@ -111,7 +117,7 @@ impl Z2mBackend {
         Ok(Self {
             name,
             server,
-            config,
+            store,
             state,
             map,
             rmap,
