@@ -1,6 +1,9 @@
 //! Wire types for the configuration admin API under `/bifrost/config`.
 
 pub mod auth;
+pub mod certificate;
+
+pub use certificate::CertificateInfo;
 
 use serde::{Deserialize, Serialize};
 

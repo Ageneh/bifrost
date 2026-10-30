@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod backend;
+pub mod certificate;
 pub mod config;
 pub mod service;
 pub mod setup;
@@ -316,6 +317,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/auth", auth::router())
         .nest("/service", service::router())
         .nest("/backend", backend::router())
+        .nest("/bridge/certificate", certificate::router())
         .nest("/config", config::router())
         .route("/ws", any(websocket))
         .fallback(not_found)
