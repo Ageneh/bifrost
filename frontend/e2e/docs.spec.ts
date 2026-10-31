@@ -17,7 +17,13 @@ import { expect, test } from '@playwright/test'
 const here = dirname(fileURLToPath(import.meta.url))
 const images = join(here, '../../doc/images')
 
+// The screens are asserted on every run; the files are rewritten only when
+// asked, because a suite that rewrites tracked files on every run leaves the
+// tree dirty for nothing. Refresh them with BIFROST_DOC_IMAGES=1.
+const rewrite = process.env.BIFROST_DOC_IMAGES === '1'
+
 async function capture(page: import('@playwright/test').Page, name: string) {
+  if (!rewrite) return
   await mkdir(images, { recursive: true })
   // the viewport, not the whole page: the bottom nav is fixed, and a
   // full-page capture would draw it again in the middle of the scroll
