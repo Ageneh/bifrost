@@ -24,6 +24,17 @@ model number typed from memory is worse than an empty cell.
 - A second client for the two-stream step: a desktop running the Hue Sync app,
   or the box plus a TV.
 
+### Running the automated part
+
+`scripts/acceptance.sh` runs every gate in the order a failure is cheapest to
+fix and prints one line per gate, then the six hardware steps. `--no-soak`
+skips the thirty-minute soak and `--no-docker` the container gate. A gate
+whose prerequisite is missing is reported as SKIP with the reason, never as a
+pass, and the exit status is 0 only when everything that ran passed.
+
+That run is necessary and not sufficient: it cannot pair a Hue app, start a
+stream from a TV, or load the panel inside Home Assistant.
+
 ### The steps
 
 Record the device model, its firmware, the date and who signed, in
