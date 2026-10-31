@@ -63,6 +63,9 @@ jobs:
     - name: Web UI behind a path-prefix proxy
       run: scripts/ui-prefix.sh
 
+    - name: Documented endpoints and settings (G12)
+      run: scripts/doc-check.sh
+
   playwright:
 
     runs-on: ubuntu-latest

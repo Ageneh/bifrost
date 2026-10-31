@@ -99,6 +99,25 @@ bifrost:
     # updates both, without a restart.
     max_streams: 2
 
+# Pairing section [optional!]
+#
+# A real Hue bridge pairs only while its link button is pressed. Bifrost has
+# no button, so the Pairing screen stands in for one.
+pairing:
+  # Honour the pairing window, or pair any client that asks
+  #
+  # false, the default, keeps the behaviour of every Bifrost before the GUI:
+  # `POST /api` pairs a client whenever it is called. true makes `POST /api`
+  # answer `link button not pressed` until the Pairing screen opens the
+  # window, and closes it again when the countdown runs out.
+  #
+  # Either way, pairing grants nothing an open Hue API does not already
+  # grant: the Hue API is unauthenticated. This is a gate on a convenience,
+  # not a security boundary.
+  #
+  # Changing it takes effect at once; nothing restarts.
+  require_link_button: false
+
 # Bridge section
 #
 # Settings for hue bridge emulation
@@ -262,7 +281,52 @@ rooms:
     name: Carport Lights
     icon: carport
 
+  # Membership, by IEEE address [optional!]
+  #
+  # Without this key the room is exactly the zigbee2mqtt group of the same
+  # name. With it, this list is the room: the Rooms screen writes it when you
+  # move a device, and applying sends the difference to the zigbee2mqtt group,
+  # so the group and the room agree afterwards.
+  #
+  # Changing it takes effect after every zigbee2mqtt backend is re-created;
+  # the change is reported as `restart_required` and a restart applies it.
+  office_group:
+    name: Office 1
+    icon: office
+    devices:
+      - "00:17:88:01:03:aa:bb:cc"
+      - "00:17:88:01:03:aa:bb:dd"
+
   ...
+```
+
+# Devices section [optional!]
+#
+# Per-device overrides, keyed by the device's IEEE address exactly as
+# zigbee2mqtt prints it. The address is the key, not the friendly name, so
+# renaming a device in zigbee2mqtt does not orphan its override.
+#
+# Changing this section takes effect after every zigbee2mqtt backend is
+# re-created; the change is reported as `restart_required`.
+devices:
+  "00:17:88:01:03:aa:bb:cc":
+    # Keep the device out of the Hue API [optional!]
+    #
+    # false hides it from the Hue API and every Hue client while leaving it
+    # on the Zigbee network, where other consumers still see it. Absent means
+    # the device imports.
+    enabled: true
+
+    # The name the Hue API shows [optional!]
+    #
+    # Overrides the zigbee2mqtt friendly name. Absent shows the friendly name.
+    name: Desk lamp
+
+    # The zigbee2mqtt group this device belongs to [optional!]
+    #
+    # For a configuration written by hand. The Rooms screen sets membership
+    # through the group instead and never writes this key.
+    room: office_group
 ```
 
 ## Configuration admin API

@@ -119,6 +119,25 @@ At this point, you're running a Bifrost bridge.
 
 The Philips Hue app should be able to find it on your network!
 
+## The web interface
+
+Bifrost also serves a web interface at `http://<bridge address>/`. It is where
+you pick the zigbee2mqtt server, sort devices into rooms, build entertainment
+zones, open the pairing window, and see why a device is missing from the Hue
+app.
+
+The first start prints a one-time setup code to standard output. Open the
+interface and enter it to choose an admin password; without one, the
+interface answers nothing but the setup code prompt. With Docker,
+`docker logs` shows the code.
+
+The Hue API itself needs no password, as before. The console's login protects
+the console and the `/bifrost` API, not the lights.
+
+See [the web interface](doc/ui.md) for every screen, and the
+[configuration reference](doc/config-reference.md) for the settings behind
+them.
+
 ### Docker
 
 #### Docker Installation
@@ -142,6 +161,7 @@ See [configuration reference](doc/config-reference.md).
 
 # Entertainment
 
+- [Web interface](doc/ui.md): every screen, and the admin API behind them.
 - [Entertainment](doc/entertainment.md): zones, positions, channels and how a
   stream is matched to a zone.
 - [Ambilight and Hue](doc/ambilight.md): pairing a TV and laying out its zone.
