@@ -164,6 +164,9 @@ csrf=$(jq -r '.csrf // empty' <<<"$reply")
 [ -n "$csrf" ] || die "setup was refused: $reply"
 
 endpoints=$( { documented "$DOC/ui.md" "^## The admin API"; documented "$DOC/config-reference.md" "^## Configuration admin API"; } | sort -u)
+# a table this script cannot parse would otherwise check nothing and pass
+found=$(grep -c '' <<<"$endpoints")
+[ "$found" -ge 40 ] || die "only $found endpoints were read from the docs; the tables changed shape"
 
 while read -r method path; do
     [ -n "$method" ] || continue

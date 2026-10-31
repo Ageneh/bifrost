@@ -52,3 +52,4 @@ note: to see what the problems were, use the option `--future-incompat-report`, 
 
 running 1 test
 rows after the first frames: 4
+test four_streams_for_half_an_hour has been running for over 60 seconds
