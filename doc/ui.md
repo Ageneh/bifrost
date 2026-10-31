@@ -149,9 +149,11 @@ contract, below.
 Everything the interface does, it does through this API. It is the supported
 way to script Bifrost.
 
-Every endpoint below requires the admin login. `/bifrost` sends no CORS
-headers: only the Hue routes (`/api`, `/clip`, `/eventstream`, `/auth`,
-`/updater`, `/licenses`, `/description.xml`) stay open to every origin.
+Every endpoint below requires the admin login, except the three under
+`/bifrost/auth` that exist to create one: `session`, `setup` and `login`.
+`/bifrost` sends no CORS headers: only the Hue routes (`/api`, `/clip`,
+`/eventstream`, `/auth`, `/updater`, `/licenses`, `/description.xml`) stay
+open to every origin.
 
 | Endpoint | Purpose |
 |---|---|
