@@ -13,6 +13,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 minutes="${1:-30}"
-log="${BIFROST_SOAK_LOG:-$root/evidence/soak-wave10.log}"
+# one file, overwritten by the latest run. A per-wave name is a trap: a run
+# launched without BIFROST_SOAK_LOG silently replaces the log an earlier wave's
+# report cites (wave 10's did).
+log="${BIFROST_SOAK_LOG:-$root/evidence/soak.log}"
 
 BIFROST_SOAK_MINUTES="$minutes" cargo test --test soak -- --ignored --nocapture 2>&1 | tee "$log"
