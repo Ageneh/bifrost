@@ -14,3 +14,8 @@
   z2m token in the URL. `state.yaml` was written by master after pairing a
   Hue user and storing the scene "Evening"; `z2m.json` is `z2m/bridge.json`
   with that scene stored in the group, as zigbee2mqtt would report it.
+
+  `cert.pem` is deliberately not stored here: it holds a private key, and a
+  copy in git would be a key nobody can rotate. `scripts/upgrade.sh` lets
+  master generate it on the first boot, exactly as the released binary does
+  on a real install, and then requires the working tree to keep it.

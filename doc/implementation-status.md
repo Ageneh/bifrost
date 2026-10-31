@@ -8,7 +8,7 @@
 | Lights      | `/api/:user/lights`                  | ✅ (partial) |
 | Groups      | `/api/:user/groups`                  | ✅ (partial) |
 | Scenes      | `/api/:user/scenes`                  | ✅ (partial) |
-| Sensors     | `/api/:user/sensors`                 | ❌           |
+| Sensors     | `/api/:user/sensors`                 | ✅ (partial) |
 
 | Endpoint                   | GET | PUT | POST | DELETE |
 |----------------------------|-----|-----|------|--------|

@@ -57,6 +57,26 @@ An entertainment zone is a Hue resource, not a Home Assistant entity. Home
 Assistant does not start or stop a stream; the TV or the Sync app does. What
 Home Assistant can do is everything else about the lights in the zone.
 
+### What Ingress does not protect
+
+Ingress puts a login in front of the console for the people Home Assistant
+already authenticated. It changes nothing about the rest of the bridge, and
+two facts follow from that:
+
+- **The Hue API stays open.** `/api`, `/clip` and `/eventstream` need no
+  password, because Hue apps on the network need no password. Anyone who can
+  reach the bridge's address and port can control the lights and add Zigbee
+  devices, whether or not they have a Home Assistant account.
+- **Trusting Ingress trusts an address.** `trust_ingress` skips the Bifrost
+  login for a request carrying `X-Ingress-Path` from one of
+  `trusted_cidrs`. The default is the Supervisor's Ingress proxy alone. Any
+  address added to that list can reach the console without a Bifrost login,
+  so widen it only to a proxy you run.
+
+Keep the bridge on a network you trust. If it must sit on an untrusted one,
+put it behind a firewall rule that admits only the Home Assistant host and
+the Hue clients, rather than relying on the console's login.
+
 ### The container's data directory
 
 One mounted directory holds everything the bridge reads and writes:
