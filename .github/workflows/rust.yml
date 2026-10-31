@@ -85,6 +85,9 @@ jobs:
         rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
         rustup default "$RUST_TOOLCHAIN"
 
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
     - name: Install the browser
       run: pnpm --dir frontend exec playwright install --with-deps chromium
 
