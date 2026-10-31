@@ -64,7 +64,10 @@ bridge_pid=$!
 # readiness signal that does not need a session
 ready=false
 for _ in $(seq 1 200); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:$http_port/bifrost/auth/session"; then
+    # a session answer means the bridge read its configuration and is
+    # serving; setup mode is never expected here, the config is written above
+    body=$(curl -fsS "http://127.0.0.1:$http_port/bifrost/auth/session" 2>/dev/null || true)
+    if [[ "$body" == *'"authenticated"'* ]]; then
         ready=true
         break
     fi

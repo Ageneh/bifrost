@@ -910,8 +910,9 @@ function proxyToUpstream(request, response, rest) {
   delete headers.host
   // Home Assistant's ingress proxy sets this on the way in; without it the
   // binary cannot know the prefix and injects a root `<base>`, which sends
-  // every relative asset to the host root
-  headers['x-ingress-path'] = headers['x-ingress-path'] ?? prefix
+  // every relative asset to the host root. Overwrite whatever the client
+  // sent: the prefix is this proxy's decision, not the browser's.
+  headers['x-ingress-path'] = prefix
 
   const forwarded = httpRequest(target, { method: request.method, headers }, (answer) => {
     response.writeHead(answer.statusCode ?? 502, answer.headers)

@@ -109,13 +109,23 @@ async fn the_z2m_token_travels_on_the_websocket_handshake() {
     wait_for_handshake(&mock).await;
 
     let urls = mock.connect_urls();
-    let url = &urls[0];
-    assert!(
-        url.contains(&format!("token={TOKEN}")),
-        "the handshake url carries no token: {url}"
+    // the handshake carries the request target, path and query, not the
+    // authority; a base only makes it parseable
+    let url = url::Url::parse("ws://mock")
+        .unwrap()
+        .join(&urls[0])
+        .expect("the handshake target did not parse");
+    let query: std::collections::HashMap<String, String> = url
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    assert_eq!(
+        query.get("token").map(String::as_str),
+        Some(TOKEN),
+        "the handshake query carries no token: {url}"
     );
     // z2m 2.x only serves the websocket under /api
-    assert!(url.contains("/api?"), "unexpected path: {url}");
+    assert_eq!(url.path(), "/api", "unexpected path: {url}");
 }
 
 /// The token is on the wire and nowhere in the tree a fixture could copy it

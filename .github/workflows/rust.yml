@@ -88,6 +88,14 @@ jobs:
     - name: Install build dependencies
       run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
 
+    - name: Cache the Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: playwright-${{ env.RUST_TOOLCHAIN }}
+
+    - name: Install the frontend dependencies
+      run: pnpm --dir frontend install --frozen-lockfile
+
     - name: Install the browser
       run: pnpm --dir frontend exec playwright install --with-deps chromium
 

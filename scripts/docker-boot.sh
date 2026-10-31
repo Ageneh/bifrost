@@ -53,13 +53,20 @@ log "building $IMAGE"
 # networking) or the Docker bridge gateway (port mapping), which is how a
 # session is skipped without inventing a password.
 legacy="$REPO_ROOT/tests/fixtures/w02/legacy"
+# Under compose's host networking the request reaches the bridge from the
+# host's own address, not from loopback; trust that address too, and only it
+host_cidr=""
+if [ "$(uname -s)" = Linux ]; then
+    host_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+    [ -n "$host_ip" ] && host_cidr=", \"$host_ip/32\""
+fi
 sed -e "s/8302/$BIFROST_HTTP_PORT/" -e "s/8402/$BIFROST_HTTPS_PORT/" \
     -e "s/8502/$BIFROST_ENTM_PORT/" "$legacy/config.yaml" \
-    | awk '/  cert_file: cert.pem/ {
+    | awk -v host_cidr="$host_cidr" '/  cert_file: cert.pem/ {
         print
         print "  auth:"
         print "    trust_ingress: true"
-        print "    trusted_cidrs: [\"127.0.0.1/32\", \"172.16.0.0/12\"]"
+        print "    trusted_cidrs: [\"127.0.0.1/32\", \"172.16.0.0/12\"" host_cidr "]"
         next
     }
     { print }' >"$data/config.yaml"
@@ -133,7 +140,7 @@ admin -X POST -d '{"revision": 1}' "$base/bifrost/config/apply" >/dev/null || di
 # this is the one a recreated container has to still find
 revision=$(admin "$base/bifrost/config/draft" | jq -r '.revision')
 document=$(admin "$base/bifrost/config") || die "GET /bifrost/config failed"
-admin -X PUT -d "$(jq -c --argjson revision "$revision" '.bridge.name = "Bifrost gate" | {revision: $revision, config: .}' <<<"$document")" \
+admin -X PUT -d "$(jq -c --argjson revision "$revision" '.bridge.name = "Bifrost gate draft" | {revision: $revision, config: .}' <<<"$document")" \
     "$base/bifrost/config/draft" >/dev/null || die "writing the second draft failed"
 
 for file in state.yaml config.draft.yaml config.yaml.bak; do
@@ -156,5 +163,11 @@ start_container
 wait_for "$base/api/config" || die "the recreated container did not answer within ${BIFROST_BOOT_TIMEOUT}s"
 after=$(hash_files)
 [ "$before" = "$after" ] || die "a recreated container changed state.yaml, config.draft.yaml or config.yaml.bak"
+
+# existence is not enough: the draft the recreated container reads must be
+# the one that was left, not an empty file with the right name
+draft_name=$(admin "$base/bifrost/config/draft" | jq -r '.config.bridge.name')
+[ "$draft_name" = "Bifrost gate draft" ] \
+    || die "the recreated container's draft says '$draft_name', not 'Bifrost gate draft'"
 
 log "PASS: config, certificate, state, draft and backup live in the data directory; a recreated container keeps all three files; GET / answered $code"
