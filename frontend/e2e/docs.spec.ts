@@ -18,10 +18,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 const images = join(here, '../../doc/images')
 
 async function capture(page: import('@playwright/test').Page, name: string) {
-    await mkdir(images, { recursive: true })
-    // the viewport, not the whole page: the bottom nav is fixed, and a
-    // full-page capture would draw it again in the middle of the scroll
-    await page.screenshot({ path: join(images, `${name}.jpg`), type: 'jpeg', quality: 82 })
+  await mkdir(images, { recursive: true })
+  // the viewport, not the whole page: the bottom nav is fixed, and a
+  // full-page capture would draw it again in the middle of the scroll
+  await page.screenshot({ path: join(images, `${name}.jpg`), type: 'jpeg', quality: 82 })
 }
 
 // one pixel per CSS pixel: the images are read in a document, not on a
@@ -29,40 +29,40 @@ async function capture(page: import('@playwright/test').Page, name: string) {
 test.use({ deviceScaleFactor: 1 })
 
 test.beforeEach(async ({ request }) => {
-    await request.post('__reset')
+  await request.post('__reset')
 })
 
 test.describe('the screens the documentation shows', () => {
-    test('home, devices, rooms, entertainment, pairing, system', async ({ page }) => {
-        await page.goto('')
-        await expect(page.getByTestId('home-view')).toBeVisible()
-        await capture(page, 'home')
+  test('home, devices, rooms, entertainment, pairing, system', async ({ page }) => {
+    await page.goto('')
+    await expect(page.getByTestId('home-view')).toBeVisible()
+    await capture(page, 'home')
 
-        await page.goto('#/devices')
-        await expect(page.getByTestId('device-table')).toBeVisible()
-        await capture(page, 'devices')
+    await page.goto('#/devices')
+    await expect(page.getByTestId('device-table')).toBeVisible()
+    await capture(page, 'devices')
 
-        await page.goto('#/rooms')
-        await expect(page.getByTestId('rooms-list')).toBeVisible()
-        await capture(page, 'rooms')
+    await page.goto('#/rooms')
+    await expect(page.getByTestId('rooms-list')).toBeVisible()
+    await capture(page, 'rooms')
 
-        await page.goto('#/entertainment')
-        await expect(page.getByTestId('entertainment-home')).toBeVisible()
-        await capture(page, 'entertainment')
+    await page.goto('#/entertainment')
+    await expect(page.getByTestId('entertainment-home')).toBeVisible()
+    await capture(page, 'entertainment')
 
-        await page.goto('#/pairing')
-        await expect(page.getByTestId('pairing-screen')).toBeVisible()
-        await capture(page, 'pairing')
+    await page.goto('#/pairing')
+    await expect(page.getByTestId('pairing-screen')).toBeVisible()
+    await capture(page, 'pairing')
 
-        await page.goto('#/system/bridge')
-        await expect(page.getByTestId('bridge-screen')).toBeVisible()
-        await capture(page, 'system-bridge')
-    })
+    await page.goto('#/system/bridge')
+    await expect(page.getByTestId('bridge-screen')).toBeVisible()
+    await capture(page, 'system-bridge')
+  })
 
-    test('the first-run wizard', async ({ page, request }) => {
-        await request.post('__setup')
-        await page.goto('#/setup')
-        await expect(page.getByTestId('wizard')).toBeVisible()
-        await capture(page, 'wizard')
-    })
+  test('the first-run wizard', async ({ page, request }) => {
+    await request.post('__setup')
+    await page.goto('#/setup')
+    await expect(page.getByTestId('wizard')).toBeVisible()
+    await capture(page, 'wizard')
+  })
 })
