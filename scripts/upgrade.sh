@@ -10,7 +10,7 @@
 # and scene id, the scene names, and the SHA-256 of the bridge certificate the
 # master generated for the install. The z2m token must not appear in the
 # working tree's log or answers, and a plain boot must not rewrite the
-# configuration or the state file.
+# configuration, replace the certificate, or create a draft or a backup.
 #
 # The data directory is the real install layout: `config.yaml`, `state.yaml`
 # and `cert.pem` side by side, as `doc/config-reference.md` describes it.
