@@ -30,6 +30,15 @@ die() {
     exit 1
 }
 
+# SHA-256 of a file, in the one spelling both Linux and macOS have.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
 # Run a command, showing its output only when it fails.
 quietly() {
     local output
