@@ -75,6 +75,7 @@ if [ "$ready" != true ]; then
     exit 1
 fi
 
+# absolute: Playwright resolves outputDir against the frontend directory
 BIFROST_E2E_UPSTREAM="http://127.0.0.1:$http_port" \
-BIFROST_E2E_OUTPUT="${BIFROST_E2E_OUTPUT:-frontend/test-results/release-$(date +%s)}" \
+BIFROST_E2E_OUTPUT="${BIFROST_E2E_OUTPUT:-$root/frontend/test-results/release-$(date +%s)}" \
     pnpm --dir frontend test:e2e
