@@ -46,13 +46,16 @@ test.describe('pairing', () => {
 
     await page.getByTestId('link-button-press').click()
 
-    await expect(page.getByTestId('pairing-banner')).toBeVisible()
-    await expect(page.getByTestId('pairing-banner')).toContainText('30s left')
+    const banner = page.getByTestId('pairing-banner')
+    await expect(banner).toBeVisible()
+    await expect(banner).toHaveAttribute('data-state', 'open')
+    await expect(banner).toHaveAttribute('data-remaining', '30')
     await expect(page.getByTestId('link-button-state')).toHaveText('window open')
 
-    // the countdown is driven by the clock, not by a wait
+    // the countdown is driven by the clock, not by a wait: the assertion
+    // reads the raw remaining seconds, never the sentence around them
     await page.clock.runFor(5000)
-    await expect(page.getByTestId('pairing-banner')).toContainText('25s left')
+    await expect(banner).toHaveAttribute('data-remaining', '25')
 
     await page.clock.runFor(30000)
     await expect(page.getByTestId('pairing-banner')).toBeHidden()

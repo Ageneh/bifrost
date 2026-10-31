@@ -10,9 +10,12 @@ import { defineConfig, devices } from '@playwright/test'
 // whichever build happened to listen first
 const PORT = Number(process.env.BIFROST_E2E_PORT ?? 4319)
 const PREFIX = '/api/hassio_ingress/test'
+// a per-run directory: two runs never overwrite each other's traces
+const OUTPUT = process.env.BIFROST_E2E_OUTPUT ?? `test-results/run-${Date.now()}`
 
 export default defineConfig({
   testDir: './e2e',
+  outputDir: OUTPUT,
   fullyParallel: false,
   // one worker: every spec file talks to the same in-memory fixture server,
   // so two files writing the draft at once race on its revision

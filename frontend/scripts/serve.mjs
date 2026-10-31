@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { extname, join, normalize } from 'node:path'
 
 const PUBLIC_DIR = new URL('../.output/public/', import.meta.url).pathname
@@ -29,6 +29,14 @@ function argument(name, fallback) {
 const port = Number(argument('--port', '4319'))
 const prefix = argument('--prefix', '/api/hassio_ingress/test').replace(/\/+$/, '')
 const base = `${prefix}/`
+
+/**
+ * When set, the shell and every static asset come from this origin — the
+ * release binary — instead of `PUBLIC_DIR`. The admin API stays on the
+ * fixtures: the real bridge needs a zigbee network and hardware behind it,
+ * while the artefact under test here is the bundle the binary embeds.
+ */
+const upstream = argument('--upstream', process.env.BIFROST_E2E_UPSTREAM ?? '').replace(/\/+$/, '')
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -891,6 +899,31 @@ async function handleClip(request, response, path) {
   return send(response, 404, JSON.stringify({ data: [], errors: [{ description: 'not found' }] }))
 }
 
+/**
+ * Forward `rest` to the release binary unchanged, headers included: the
+ * binary injects `<base>` and `window.__BIFROST_BASE__` from `X-Ingress-Path`,
+ * which is exactly what the prefix tests read back.
+ */
+function proxyToUpstream(request, response, rest) {
+  const target = new URL(`${upstream}/${rest}`)
+  const headers = { ...request.headers }
+  delete headers.host
+  // Home Assistant's ingress proxy sets this on the way in; without it the
+  // binary cannot know the prefix and injects a root `<base>`, which sends
+  // every relative asset to the host root. Overwrite whatever the client
+  // sent: the prefix is this proxy's decision, not the browser's.
+  headers['x-ingress-path'] = prefix
+
+  const forwarded = httpRequest(target, { method: request.method, headers }, (answer) => {
+    response.writeHead(answer.statusCode ?? 502, answer.headers)
+    answer.pipe(response)
+  })
+  forwarded.on('error', () => {
+    send(response, 502, 'the release binary did not answer', 'text/plain')
+  })
+  request.pipe(forwarded)
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
   const path = url.pathname
@@ -953,6 +986,12 @@ const server = createServer(async (request, response) => {
     draft.config = null
     draft.revision = 0
     return send(response, 204, '')
+  }
+
+  // the shell and the assets are the release binary's; the admin endpoints
+  // below stay fixtures because they need a zigbee network behind them
+  if (upstream && !rest.startsWith('bifrost/') && !rest.startsWith('clip/v2/')) {
+    return proxyToUpstream(request, response, rest)
   }
 
   if (rest.startsWith('clip/v2/')) {

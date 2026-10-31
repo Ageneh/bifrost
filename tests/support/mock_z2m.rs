@@ -21,12 +21,19 @@
 //! device leaves ([`MockZ2m::remove_device`]), when one is reachable or not
 //! ([`MockZ2m::set_availability`]), and when the server itself goes away
 //! ([`MockZ2m::drop_connection`]).
+//!
+//! The wave-10 promotion finishes the backbone the whole suite rests on:
+//! every `<name>/set` is counted per friendly name ([`MockZ2m::set_count`]),
+//! so a test can assert one light was told and another was not; scene
+//! store/recall/remove and group member add/remove travel the same paths
+//! z2m uses and are answered on `bridge/response/<same>`; and a client that
+//! reconnects after [`MockZ2m::drop_connection`] gets the greeting again.
 
 // every test binary compiles its own copy of this module, and each uses a
 // different part of the handle
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8Path;
@@ -50,6 +57,14 @@ struct Shared {
     /// The friendly name of every device the greeting announces, by address.
     names: std::collections::HashMap<String, String>,
     received: Mutex<Vec<RawMessage>>,
+    /// Whether inbound messages are kept in `received`. A soak sends tens of
+    /// thousands of frames and needs the counters, not the history.
+    recording: AtomicBool,
+    /// `<name>/set` messages, counted by the friendly name they address.
+    sets: Mutex<std::collections::HashMap<String, usize>>,
+    /// The url every client connected with, query included: z2m 2.x takes
+    /// its auth token there, so a test can see it leave the bridge.
+    connect_urls: Mutex<Vec<String>>,
     connections: AtomicUsize,
     outbound: broadcast::Sender<String>,
     /// Tells every open connection to hang up, as a server going away does.
@@ -59,7 +74,17 @@ struct Shared {
 
 impl Shared {
     fn record(&self, message: RawMessage) {
-        self.received.lock().unwrap().push(message);
+        if let Some(name) = message.topic.strip_suffix("/set") {
+            *self
+                .sets
+                .lock()
+                .unwrap()
+                .entry(name.to_string())
+                .or_default() += 1;
+        }
+        if self.recording.load(Ordering::SeqCst) {
+            self.received.lock().unwrap().push(message);
+        }
         self.changed.notify_waiters();
     }
 }
@@ -88,6 +113,9 @@ impl MockZ2m {
                 .map(serde_json::to_string)
                 .collect::<serde_json::Result<Vec<_>>>()?,
             received: Mutex::new(vec![]),
+            recording: AtomicBool::new(true),
+            sets: Mutex::new(std::collections::HashMap::new()),
+            connect_urls: Mutex::new(vec![]),
             connections: AtomicUsize::new(0),
             outbound,
             hang_up,
@@ -124,6 +152,13 @@ impl MockZ2m {
     /// three lights, one of them in no group.
     pub async fn start_w05() -> Result<Self> {
         Self::start(&fixture_path("w05/z2m/bridge.json")).await
+    }
+
+    /// Start the mock on the wave-10 fixture, `tests/fixtures/w10/bridge.json`:
+    /// two lights in one group and one motion sensor, the smallest network
+    /// that still exercises every path the suite leans on.
+    pub async fn start_w10() -> Result<Self> {
+        Self::start(&fixture_path("w10/bridge.json")).await
     }
 
     /// The friendly names of the devices the greeting announces.
@@ -187,10 +222,40 @@ impl MockZ2m {
         self.shared.connections.load(Ordering::SeqCst)
     }
 
+    /// Stop keeping the message history, and drop what was kept. The
+    /// per-name counters keep working; `received` and `wait_for` see nothing
+    /// new, which is what lets a soak send tens of thousands of frames
+    /// without growing this process's heap.
+    pub fn stop_recording(&self) {
+        self.shared.recording.store(false, Ordering::SeqCst);
+        self.shared.received.lock().unwrap().clear();
+    }
+
+    /// The url every client connected with, in arrival order, query included.
+    /// The z2m 2.x auth token travels here, so this is where a test proves
+    /// the bridge sends it and where the redaction checks read it.
+    #[must_use]
+    pub fn connect_urls(&self) -> Vec<String> {
+        self.shared.connect_urls.lock().unwrap().clone()
+    }
+
     /// Everything clients have sent so far, in arrival order.
     #[must_use]
     pub fn received(&self) -> Vec<RawMessage> {
         self.shared.received.lock().unwrap().clone()
+    }
+
+    /// How many `<name>/set` messages a client sent to `name`; a group name
+    /// counts its group-level scene commands, a device name its own updates.
+    #[must_use]
+    pub fn set_count(&self, name: &str) -> usize {
+        self.shared
+            .sets
+            .lock()
+            .unwrap()
+            .get(name)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// The payloads clients sent on `topic`.
@@ -303,8 +368,23 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
     }
 }
 
+#[allow(clippy::result_large_err)] // the handshake's own error type
 async fn serve(stream: TcpStream, shared: Arc<Shared>) -> Result<()> {
-    let mut socket = tokio_tungstenite::accept_async(stream).await?;
+    // the handshake is the one place the connect url is visible, and the
+    // z2m 2.x auth token travels in its query
+    let mut socket = tokio_tungstenite::accept_hdr_async(
+        stream,
+        |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+         response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+            shared
+                .connect_urls
+                .lock()
+                .unwrap()
+                .push(request.uri().to_string());
+            Ok(response)
+        },
+    )
+    .await?;
     shared.connections.fetch_add(1, Ordering::SeqCst);
     let mut outbound = shared.outbound.subscribe();
     let mut hang_up = shared.hang_up.subscribe();

@@ -133,6 +133,8 @@ onBeforeUnmount(() => {
       role="status"
       aria-live="polite"
       data-testid="pairing-banner"
+      data-state="open"
+      :data-remaining="remaining"
     >
       <strong>Pairing window open — {{ remaining }}s left.</strong>
       Pair from the client now. A second client in the same window is refused.

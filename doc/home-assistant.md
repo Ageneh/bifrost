@@ -9,9 +9,25 @@ existing Hue integration is the client.
 The add-on is the upstream [bifrost-hassio](https://github.com/chrivers/bifrost-hassio)
 project. It is not part of this repository, and the parts Home Assistant
 requires of an add-on live there: the Ingress route, the watchdog, and the
-`/data` directory the configuration and state are written to. Bifrost itself
-only has to serve its UI behind a path prefix and trust the Supervisor's
-Ingress proxy, which it does:
+`/data` directory the configuration and state are written to.
+
+**Ownership.** This repository does not own the add-on. The Ingress route,
+the Supervisor watchdog and the `/data` layout are upstream, in
+`bifrost-hassio`, which no row of this programme's plan owns. This
+programme does not fork it. The dependency is pinned at upstream commit
+`af62c32ae90e585d3e72d12156f7c85f64c33ea6` (2025-05-20); a fork is only
+considered by reading that tree first, as part of a later ticket. What this
+repository provides is the image the add-on runs and the readiness for it:
+prefix-safe assets and the `<base>` injection below are readiness, not
+ownership.
+
+What this repository ships for that install is the container image and the
+compose file. It ships no add-on file, no `config.yaml` for the Supervisor
+and no `run.sh`: those live upstream, and a copy here would drift from the
+repository that owns them.
+
+Bifrost itself only has to serve its UI behind a path prefix and trust the
+Supervisor's Ingress proxy, which it does:
 
 - `bifrost.auth.trust_ingress` makes a request carrying `X-Ingress-Path`
   skip the Bifrost login, because Home Assistant has already authenticated
@@ -40,6 +56,17 @@ the names zigbee2mqtt already has.
 An entertainment zone is a Hue resource, not a Home Assistant entity. Home
 Assistant does not start or stop a stream; the TV or the Sync app does. What
 Home Assistant can do is everything else about the lights in the zone.
+
+### The container's data directory
+
+One mounted directory holds everything the bridge reads and writes:
+`config.yaml`, `config.draft.yaml` (an unapplied draft), `config.yaml.bak`
+(the previous configuration), `state.yaml`, `sessions.yaml` and the
+certificate. `docker-compose.yaml` mounts `./data` there and points
+`BIFROST_CONFIG` into it, so recreating the container from the compose file
+keeps all of them. The container gate (`scripts/docker-boot.sh`) recreates a
+container and compares those three files, because a fixture-based gate runs
+on a directory and cannot see a container losing them.
 
 ### Behind the prefix
 
