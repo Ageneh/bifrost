@@ -1,0 +1,47 @@
+import { defineConfig, devices } from '@playwright/test'
+
+/**
+ * The shell is checked at the width it has to survive: 390 px, the narrowest
+ * phone the console is expected on, behind an ingress prefix like the one
+ * Home Assistant serves it under.
+ */
+// the port is overridable so two checkouts on one machine do not share a
+// server: `reuseExistingServer` would otherwise run the tests against
+// whichever build happened to listen first
+const PORT = Number(process.env.BIFROST_E2E_PORT ?? 4319)
+const PREFIX = '/api/hassio_ingress/test'
+// a per-run directory: two runs never overwrite each other's traces
+const OUTPUT = process.env.BIFROST_E2E_OUTPUT ?? `test-results/run-${Date.now()}`
+
+export default defineConfig({
+  testDir: './e2e',
+  outputDir: OUTPUT,
+  fullyParallel: false,
+  // one worker: every spec file talks to the same in-memory fixture server,
+  // so two files writing the draft at once race on its revision
+  workers: 1,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  use: {
+    baseURL: `http://127.0.0.1:${PORT}${PREFIX}/`,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    {
+      name: 'phone',
+      use: {
+        ...devices['iPhone 13'],
+        // iPhone 13 is 390 x 844, the width the wave brief names
+        viewport: { width: 390, height: 844 },
+      },
+    },
+  ],
+  webServer: {
+    command: `node scripts/serve.mjs --port ${PORT} --prefix ${PREFIX}`,
+    url: `http://127.0.0.1:${PORT}${PREFIX}/`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
+  },
+})

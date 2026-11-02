@@ -10,6 +10,13 @@ pub trait ServiceTemplate: Send {
     fn generate(&self, instance: String) -> Result<BoxDynService, SvcError>;
 }
 
+#[cfg(feature = "manager")]
+impl ServiceTemplate for Box<dyn ServiceTemplate> {
+    fn generate(&self, instance: String) -> Result<BoxDynService, SvcError> {
+        (**self).generate(instance)
+    }
+}
+
 pub struct ErrorAdapter<S: Service> {
     svc: S,
 }

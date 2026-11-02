@@ -8,3 +8,12 @@
 *~
 /data
 /*.json
+
+# web UI
+/frontend/node_modules
+/frontend/.nuxt
+/frontend/.output
+/frontend/.data
+/frontend/playwright-report
+/frontend/test-results
+/frontend/dist

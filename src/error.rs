@@ -47,6 +47,12 @@ pub enum ApiError {
     ConfigError(#[from] config::ConfigError),
 
     #[error(transparent)]
+    ConfigStoreError(#[from] crate::config_store::ConfigStoreError),
+
+    #[error(transparent)]
+    AuthError(#[from] crate::auth::AuthError),
+
+    #[error(transparent)]
     QuickXmlSeError(#[from] quick_xml::se::SeError),
 
     #[error(transparent)]
@@ -109,6 +115,11 @@ pub enum ApiError {
     #[error(transparent)]
     NativeTlsError(#[from] native_tls::Error),
 
+    /// Something a person has to read: a server that cannot be reached, a
+    /// list that never arrived.
+    #[error("{0}")]
+    Other(String),
+
     #[error("Service error: {0}")]
     SvcError(String),
 
@@ -163,6 +174,11 @@ pub enum ApiError {
 
     #[error("Entertainment Stream init error")]
     EntStreamInitError,
+
+    #[error(
+        "More than one entertainment area claims these lights: {0}. Name the area in the stream."
+    )]
+    EntStreamAmbiguous(String),
 
     #[error("Entertainment Stream timeout")]
     EntStreamTimeout,

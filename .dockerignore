@@ -1,0 +1,12 @@
+.git
+target
+data
+certs
+frontend/node_modules
+frontend/.output
+frontend/.nuxt
+config.yaml
+config.draft.yaml
+config.yaml.bak
+state.yaml
+*.pem

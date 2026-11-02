@@ -7,10 +7,6 @@ use hue::api::{
 };
 use hue::stream::HueStreamLightsV2;
 
-use crate::Client;
-use crate::config::Z2mServer;
-use crate::error::BifrostResult;
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BackendRequest {
@@ -25,15 +21,12 @@ pub enum BackendRequest {
 
     Delete(ResourceLink),
 
+    /// The area names the entertainment configuration, so every command that
+    /// follows carries it: two areas stream at once and a backend must route
+    /// each one to its own state.
     EntertainmentStart(Uuid),
-    EntertainmentFrame(HueStreamLightsV2),
-    EntertainmentStop(),
+    EntertainmentFrame(Uuid, HueStreamLightsV2),
+    EntertainmentStop(Uuid),
 
     ZigbeeDeviceDiscovery(ResourceLink, ZigbeeDeviceDiscoveryUpdate),
-}
-
-impl Client {
-    pub async fn post_backend(&self, name: &str, backend: Z2mServer) -> BifrostResult<()> {
-        self.post(&format!("backend/z2m/{name}"), backend).await
-    }
 }

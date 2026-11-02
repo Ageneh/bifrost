@@ -1,0 +1,710 @@
+{
+  "data": [
+    {
+      "bridge_id": "001122fffe334455",
+      "id": "118ea023-5bdc-5adc-bb8a-e6095720392e",
+      "owner": {
+        "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+        "rtype": "device"
+      },
+      "time_zone": {
+        "time_zone": "Europe/Berlin"
+      },
+      "type": "bridge"
+    },
+    {
+      "children": [
+        {
+          "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+          "rtype": "device"
+        },
+        {
+          "rid": "c71458be-36df-560e-933e-2c9ff8dd182f",
+          "rtype": "room"
+        }
+      ],
+      "id": "77121ee7-5a23-5a3a-81b9-4ec751f9a10c",
+      "id_v1": "/groups/0",
+      "services": [
+        {
+          "rid": "50cc42fe-c199-551e-8899-ff348de4482a",
+          "rtype": "grouped_light"
+        }
+      ],
+      "type": "bridge_home"
+    },
+    {
+      "id": "0f1495ed-1ad1-5391-a214-4b825af53e0e",
+      "metadata": {
+        "archetype": "bridge_v2",
+        "name": "Bifrost Bridge Home"
+      },
+      "product_data": {
+        "certified": true,
+        "manufacturer_name": "Signify Netherlands B.V.",
+        "model_id": "BSB002",
+        "product_archetype": "bridge_v2",
+        "product_name": "Hue Bridge",
+        "software_version": "1.70.1970084010"
+      },
+      "services": [
+        {
+          "rid": "118ea023-5bdc-5adc-bb8a-e6095720392e",
+          "rtype": "bridge"
+        }
+      ],
+      "type": "device"
+    },
+    {
+      "id": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+      "identify": {},
+      "metadata": {
+        "archetype": "bridge_v2",
+        "name": "Bifrost"
+      },
+      "product_data": {
+        "certified": true,
+        "manufacturer_name": "Signify Netherlands B.V.",
+        "model_id": "BSB002",
+        "product_archetype": "bridge_v2",
+        "product_name": "Hue Bridge",
+        "software_version": "1.70.1970084010"
+      },
+      "services": [
+        {
+          "rid": "118ea023-5bdc-5adc-bb8a-e6095720392e",
+          "rtype": "bridge"
+        },
+        {
+          "rid": "3602520b-d2f3-5725-aa13-48f62d1d4b7a",
+          "rtype": "entertainment"
+        },
+        {
+          "rid": "7580e361-d874-55b9-8d35-a7e0cc7f008c",
+          "rtype": "zigbee_device_discovery"
+        },
+        {
+          "rid": "cb99447d-d2fb-5061-bb65-bfec9adf2a52",
+          "rtype": "zigbee_connectivity"
+        }
+      ],
+      "type": "device"
+    },
+    {
+      "id": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+      "id_v1": "/lights/9",
+      "identify": {},
+      "metadata": {
+        "archetype": "sultan_bulb",
+        "name": "Kitchen ceiling"
+      },
+      "product_data": {
+        "certified": true,
+        "hardware_platform_type": "100b-10c",
+        "manufacturer_name": "Signify Netherlands B.V.",
+        "model_id": "LCT015",
+        "product_archetype": "sultan_bulb",
+        "product_name": "LCT015",
+        "software_version": "1.93.11"
+      },
+      "services": [
+        {
+          "rid": "a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa",
+          "rtype": "entertainment"
+        },
+        {
+          "rid": "c649035c-0948-5211-a3e8-59e785037746",
+          "rtype": "light"
+        },
+        {
+          "rid": "d6358aa0-8bcb-5b1a-bed9-917fba577b00",
+          "rtype": "zigbee_connectivity"
+        },
+        {
+          "rid": "f142fedb-cf35-5962-a3d0-c72e5b7a4afa",
+          "rtype": "taurus_7455"
+        }
+      ],
+      "type": "device"
+    },
+    {
+      "id": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+      "id_v1": "/lights/14",
+      "identify": {},
+      "metadata": {
+        "archetype": "unknown_archetype",
+        "name": "Hall lamp"
+      },
+      "product_data": {
+        "certified": true,
+        "manufacturer_name": "Signify Netherlands B.V.",
+        "model_id": "LTW010",
+        "product_archetype": "unknown_archetype",
+        "product_name": "LTW010",
+        "software_version": "1.93.11"
+      },
+      "services": [
+        {
+          "rid": "63c1c58a-d2d3-565a-8ba5-ca9eb0342a92",
+          "rtype": "entertainment"
+        },
+        {
+          "rid": "77a2fb27-4f6d-55f5-ade5-ac5826bbd347",
+          "rtype": "zigbee_connectivity"
+        },
+        {
+          "rid": "78d35de1-53db-59ee-9710-1d1aee1c8c10",
+          "rtype": "taurus_7455"
+        },
+        {
+          "rid": "afd21f32-6bd4-529b-8a84-c7134ccd8fe4",
+          "rtype": "light"
+        }
+      ],
+      "type": "device"
+    },
+    {
+      "equalizer": false,
+      "id": "3602520b-d2f3-5725-aa13-48f62d1d4b7a",
+      "max_streams": 2,
+      "owner": {
+        "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+        "rtype": "device"
+      },
+      "proxy": true,
+      "renderer": false,
+      "type": "entertainment"
+    },
+    {
+      "equalizer": true,
+      "id": "63c1c58a-d2d3-565a-8ba5-ca9eb0342a92",
+      "id_v1": "/lights/14",
+      "owner": {
+        "rid": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+        "rtype": "device"
+      },
+      "proxy": true,
+      "renderer": true,
+      "renderer_reference": {
+        "rid": "afd21f32-6bd4-529b-8a84-c7134ccd8fe4",
+        "rtype": "light"
+      },
+      "segments": {
+        "configurable": false,
+        "max_segments": 1,
+        "segments": [
+          {
+            "length": 1,
+            "start": 0
+          }
+        ]
+      },
+      "type": "entertainment"
+    },
+    {
+      "equalizer": true,
+      "id": "a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa",
+      "id_v1": "/lights/9",
+      "owner": {
+        "rid": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+        "rtype": "device"
+      },
+      "proxy": true,
+      "renderer": true,
+      "renderer_reference": {
+        "rid": "c649035c-0948-5211-a3e8-59e785037746",
+        "rtype": "light"
+      },
+      "segments": {
+        "configurable": false,
+        "max_segments": 1,
+        "segments": [
+          {
+            "length": 1,
+            "start": 0
+          }
+        ]
+      },
+      "type": "entertainment"
+    },
+    {
+      "alert": {
+        "action_values": [
+          "breathe"
+        ]
+      },
+      "color": {},
+      "color_temperature": {},
+      "color_temperature_delta": {},
+      "dimming": {
+        "brightness": 8.7
+      },
+      "dimming_delta": {},
+      "dynamics": {},
+      "id": "50cc42fe-c199-551e-8899-ff348de4482a",
+      "id_v1": "/groups/3",
+      "on": {
+        "on": true
+      },
+      "owner": {
+        "rid": "77121ee7-5a23-5a3a-81b9-4ec751f9a10c",
+        "rtype": "bridge_home"
+      },
+      "signaling": {
+        "signal_values": [
+          "alternating",
+          "no_signal",
+          "on_off",
+          "on_off_color"
+        ]
+      },
+      "type": "grouped_light"
+    },
+    {
+      "alert": null,
+      "color": {},
+      "color_temperature": {},
+      "color_temperature_delta": {},
+      "dimming": null,
+      "dimming_delta": {},
+      "dynamics": {},
+      "id": "89fcee4b-dffb-546d-93a4-b7e06400ece0",
+      "id_v1": "/groups/18",
+      "on": null,
+      "owner": {
+        "rid": "c71458be-36df-560e-933e-2c9ff8dd182f",
+        "rtype": "room"
+      },
+      "signaling": null,
+      "type": "grouped_light"
+    },
+    {
+      "alert": {
+        "action_values": [
+          "breathe"
+        ]
+      },
+      "color_temperature": {
+        "mirek": 400,
+        "mirek_schema": {
+          "mirek_maximum": 500,
+          "mirek_minimum": 153
+        },
+        "mirek_valid": true
+      },
+      "color_temperature_delta": {},
+      "dimming": {
+        "brightness": 39.37007874015748,
+        "min_dim_level": 0.01
+      },
+      "dimming_delta": {},
+      "dynamics": {
+        "speed": 0.0,
+        "speed_valid": false,
+        "status": "none",
+        "status_values": [
+          "none",
+          "dynamic_palette"
+        ]
+      },
+      "effects": {
+        "effect_values": [
+          "no_effect",
+          "candle",
+          "fire",
+          "prism",
+          "sparkle",
+          "opal",
+          "glisten",
+          "underwater",
+          "cosmos",
+          "sunbeam",
+          "enchant"
+        ],
+        "status": "no_effect",
+        "status_values": [
+          "no_effect",
+          "candle",
+          "fire",
+          "prism",
+          "sparkle",
+          "opal",
+          "glisten",
+          "underwater",
+          "cosmos",
+          "sunbeam",
+          "enchant"
+        ]
+      },
+      "effects_v2": {
+        "action": {
+          "effect_values": [
+            "no_effect",
+            "candle",
+            "fire",
+            "prism",
+            "sparkle",
+            "opal",
+            "glisten",
+            "underwater",
+            "cosmos",
+            "sunbeam",
+            "enchant"
+          ]
+        },
+        "status": {
+          "effect": "no_effect",
+          "effect_values": [
+            "no_effect",
+            "candle",
+            "fire",
+            "prism",
+            "sparkle",
+            "opal",
+            "glisten",
+            "underwater",
+            "cosmos",
+            "sunbeam",
+            "enchant"
+          ]
+        }
+      },
+      "id": "afd21f32-6bd4-529b-8a84-c7134ccd8fe4",
+      "id_v1": "/lights/14",
+      "identify": {},
+      "metadata": {
+        "archetype": "unknown_archetype",
+        "function": "decorative",
+        "name": "Hall lamp"
+      },
+      "mode": "normal",
+      "on": {
+        "on": false
+      },
+      "owner": {
+        "rid": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+        "rtype": "device"
+      },
+      "powerup": {
+        "color": {
+          "color_temperature": {
+            "mirek": 366
+          },
+          "mode": "color_temperature"
+        },
+        "configured": true,
+        "dimming": {
+          "dimming": {
+            "brightness": 100.0
+          },
+          "mode": "dimming"
+        },
+        "on": {
+          "mode": "on",
+          "on": {
+            "on": true
+          }
+        },
+        "preset": "safety"
+      },
+      "product_data": {
+        "function": "decorative"
+      },
+      "service_id": 0,
+      "signaling": {
+        "signal_values": [
+          "no_signal",
+          "on_off",
+          "on_off_color",
+          "alternating"
+        ]
+      },
+      "timed_effects": {
+        "effect_values": [
+          "no_effect",
+          "sunrise",
+          "sunset"
+        ],
+        "status": "no_effect",
+        "status_values": [
+          "no_effect",
+          "sunrise",
+          "sunset"
+        ]
+      },
+      "type": "light"
+    },
+    {
+      "alert": {
+        "action_values": [
+          "breathe"
+        ]
+      },
+      "color": {
+        "gamut": {
+          "blue": {
+            "x": 0.1532,
+            "y": 0.0475
+          },
+          "green": {
+            "x": 0.17,
+            "y": 0.7
+          },
+          "red": {
+            "x": 0.6915,
+            "y": 0.3083
+          }
+        },
+        "gamut_type": "C",
+        "xy": {
+          "x": 0.31271,
+          "y": 0.32902
+        }
+      },
+      "color_temperature": {
+        "mirek": 300,
+        "mirek_schema": {
+          "mirek_maximum": 500,
+          "mirek_minimum": 153
+        },
+        "mirek_valid": true
+      },
+      "color_temperature_delta": {},
+      "dimming": {
+        "brightness": 78.74015748031496,
+        "min_dim_level": 0.01
+      },
+      "dimming_delta": {},
+      "dynamics": {
+        "speed": 0.0,
+        "speed_valid": false,
+        "status": "none",
+        "status_values": [
+          "none",
+          "dynamic_palette"
+        ]
+      },
+      "effects": {
+        "effect_values": [
+          "no_effect",
+          "candle",
+          "fire",
+          "prism",
+          "sparkle",
+          "opal",
+          "glisten",
+          "underwater",
+          "cosmos",
+          "sunbeam",
+          "enchant"
+        ],
+        "status": "no_effect",
+        "status_values": [
+          "no_effect",
+          "candle",
+          "fire",
+          "prism",
+          "sparkle",
+          "opal",
+          "glisten",
+          "underwater",
+          "cosmos",
+          "sunbeam",
+          "enchant"
+        ]
+      },
+      "effects_v2": {
+        "action": {
+          "effect_values": [
+            "no_effect",
+            "candle",
+            "fire",
+            "prism",
+            "sparkle",
+            "opal",
+            "glisten",
+            "underwater",
+            "cosmos",
+            "sunbeam",
+            "enchant"
+          ]
+        },
+        "status": {
+          "effect": "no_effect",
+          "effect_values": [
+            "no_effect",
+            "candle",
+            "fire",
+            "prism",
+            "sparkle",
+            "opal",
+            "glisten",
+            "underwater",
+            "cosmos",
+            "sunbeam",
+            "enchant"
+          ]
+        }
+      },
+      "id": "c649035c-0948-5211-a3e8-59e785037746",
+      "id_v1": "/lights/9",
+      "identify": {},
+      "metadata": {
+        "archetype": "sultan_bulb",
+        "function": "decorative",
+        "name": "Kitchen ceiling"
+      },
+      "mode": "normal",
+      "on": {
+        "on": true
+      },
+      "owner": {
+        "rid": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+        "rtype": "device"
+      },
+      "powerup": {
+        "color": {
+          "color_temperature": {
+            "mirek": 366
+          },
+          "mode": "color_temperature"
+        },
+        "configured": true,
+        "dimming": {
+          "dimming": {
+            "brightness": 100.0
+          },
+          "mode": "dimming"
+        },
+        "on": {
+          "mode": "on",
+          "on": {
+            "on": true
+          }
+        },
+        "preset": "safety"
+      },
+      "product_data": {
+        "function": "decorative"
+      },
+      "service_id": 0,
+      "signaling": {
+        "signal_values": [
+          "no_signal",
+          "on_off",
+          "on_off_color",
+          "alternating"
+        ]
+      },
+      "timed_effects": {
+        "effect_values": [
+          "no_effect",
+          "sunrise",
+          "sunset"
+        ],
+        "status": "no_effect",
+        "status_values": [
+          "no_effect",
+          "sunrise",
+          "sunset"
+        ]
+      },
+      "type": "light"
+    },
+    {
+      "children": [
+        {
+          "rid": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+          "rtype": "device"
+        },
+        {
+          "rid": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+          "rtype": "device"
+        }
+      ],
+      "id": "c71458be-36df-560e-933e-2c9ff8dd182f",
+      "id_v1": "/groups/18",
+      "metadata": {
+        "archetype": "home",
+        "name": "Kitchen"
+      },
+      "services": [
+        {
+          "rid": "89fcee4b-dffb-546d-93a4-b7e06400ece0",
+          "rtype": "grouped_light"
+        }
+      ],
+      "type": "room"
+    },
+    {
+      "capabilities": [
+        "sensor",
+        "collector",
+        "sync"
+      ],
+      "id": "78d35de1-53db-59ee-9710-1d1aee1c8c10",
+      "owner": {
+        "rid": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+        "rtype": "device"
+      },
+      "type": "taurus_7455"
+    },
+    {
+      "capabilities": [
+        "sensor",
+        "collector",
+        "sync"
+      ],
+      "id": "f142fedb-cf35-5962-a3d0-c72e5b7a4afa",
+      "owner": {
+        "rid": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+        "rtype": "device"
+      },
+      "type": "taurus_7455"
+    },
+    {
+      "id": "77a2fb27-4f6d-55f5-ade5-ac5826bbd347",
+      "mac_address": "0x0017880100000002",
+      "owner": {
+        "rid": "d5d902e3-d906-5244-a6e0-1beaedff692a",
+        "rtype": "device"
+      },
+      "status": "connected",
+      "type": "zigbee_connectivity"
+    },
+    {
+      "channel": {
+        "status": "set",
+        "value": "channel_25"
+      },
+      "id": "cb99447d-d2fb-5061-bb65-bfec9adf2a52",
+      "mac_address": "11:22:33:44:55:66:77:88",
+      "owner": {
+        "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+        "rtype": "device"
+      },
+      "status": "connected",
+      "type": "zigbee_connectivity"
+    },
+    {
+      "id": "d6358aa0-8bcb-5b1a-bed9-917fba577b00",
+      "mac_address": "0x0017880100000001",
+      "owner": {
+        "rid": "cdab877c-e51a-5d69-a65f-4b810bfed550",
+        "rtype": "device"
+      },
+      "status": "connected",
+      "type": "zigbee_connectivity"
+    },
+    {
+      "id": "7580e361-d874-55b9-8d35-a7e0cc7f008c",
+      "owner": {
+        "rid": "7905e8a9-de8e-59d0-b4cf-425a0e4139a6",
+        "rtype": "device"
+      },
+      "status": "ready",
+      "type": "zigbee_device_discovery"
+    }
+  ],
+  "errors": []
+}

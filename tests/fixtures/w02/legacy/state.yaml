@@ -1,0 +1,577 @@
+version: V1
+aux:
+  '825a6b78-f367-546d-93cc-543f4459776f':
+    topic: Evening
+    index: 0
+  afd21f32-6bd4-529b-8a84-c7134ccd8fe4:
+    topic: Hall lamp
+    index: null
+  c649035c-0948-5211-a3e8-59e785037746:
+    topic: Kitchen ceiling
+    index: null
+id_v1:
+  forward:
+    '0f1495ed-1ad1-5391-a214-4b825af53e0e': 2
+    '118ea023-5bdc-5adc-bb8a-e6095720392e': 1
+    '3602520b-d2f3-5725-aa13-48f62d1d4b7a': 6
+    '50cc42fe-c199-551e-8899-ff348de4482a': 7
+    '63c1c58a-d2d3-565a-8ba5-ca9eb0342a92': 15
+    '7580e361-d874-55b9-8d35-a7e0cc7f008c': 4
+    '77121ee7-5a23-5a3a-81b9-4ec751f9a10c': 3
+    '77a2fb27-4f6d-55f5-ade5-ac5826bbd347': 17
+    '78d35de1-53db-59ee-9710-1d1aee1c8c10': 16
+    '7905e8a9-de8e-59d0-b4cf-425a0e4139a6': 0
+    '825a6b78-f367-546d-93cc-543f4459776f': 20
+    '89fcee4b-dffb-546d-93a4-b7e06400ece0': 19
+    a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa: 10
+    afd21f32-6bd4-529b-8a84-c7134ccd8fe4: 14
+    c649035c-0948-5211-a3e8-59e785037746: 9
+    c71458be-36df-560e-933e-2c9ff8dd182f: 18
+    cb99447d-d2fb-5061-bb65-bfec9adf2a52: 5
+    cdab877c-e51a-5d69-a65f-4b810bfed550: 8
+    d5d902e3-d906-5244-a6e0-1beaedff692a: 13
+    d6358aa0-8bcb-5b1a-bed9-917fba577b00: 12
+    f142fedb-cf35-5962-a3d0-c72e5b7a4afa: 11
+  reverse:
+    0: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+    1: '118ea023-5bdc-5adc-bb8a-e6095720392e'
+    2: '0f1495ed-1ad1-5391-a214-4b825af53e0e'
+    3: '77121ee7-5a23-5a3a-81b9-4ec751f9a10c'
+    4: '7580e361-d874-55b9-8d35-a7e0cc7f008c'
+    5: cb99447d-d2fb-5061-bb65-bfec9adf2a52
+    6: '3602520b-d2f3-5725-aa13-48f62d1d4b7a'
+    7: '50cc42fe-c199-551e-8899-ff348de4482a'
+    8: cdab877c-e51a-5d69-a65f-4b810bfed550
+    9: c649035c-0948-5211-a3e8-59e785037746
+    10: a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa
+    11: f142fedb-cf35-5962-a3d0-c72e5b7a4afa
+    12: d6358aa0-8bcb-5b1a-bed9-917fba577b00
+    13: d5d902e3-d906-5244-a6e0-1beaedff692a
+    14: afd21f32-6bd4-529b-8a84-c7134ccd8fe4
+    15: '63c1c58a-d2d3-565a-8ba5-ca9eb0342a92'
+    16: '78d35de1-53db-59ee-9710-1d1aee1c8c10'
+    17: '77a2fb27-4f6d-55f5-ade5-ac5826bbd347'
+    18: c71458be-36df-560e-933e-2c9ff8dd182f
+    19: '89fcee4b-dffb-546d-93a4-b7e06400ece0'
+    20: '825a6b78-f367-546d-93cc-543f4459776f'
+res:
+  '0f1495ed-1ad1-5391-a214-4b825af53e0e':
+    type: device
+    product_data:
+      model_id: BSB002
+      manufacturer_name: Signify Netherlands B.V.
+      product_name: Hue Bridge
+      product_archetype: bridge_v2
+      certified: true
+      software_version: '1.70.1970084010'
+    metadata:
+      name: Bifrost Bridge Home
+      archetype: bridge_v2
+    services:
+    - rid: '118ea023-5bdc-5adc-bb8a-e6095720392e'
+      rtype: bridge
+  '118ea023-5bdc-5adc-bb8a-e6095720392e':
+    type: bridge
+    bridge_id: '001122fffe334455'
+    owner:
+      rid: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+      rtype: device
+    time_zone:
+      time_zone: Europe/Berlin
+  '3602520b-d2f3-5725-aa13-48f62d1d4b7a':
+    type: entertainment
+    equalizer: false
+    owner:
+      rid: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+      rtype: device
+    proxy: true
+    renderer: false
+    max_streams: 1
+  '50cc42fe-c199-551e-8899-ff348de4482a':
+    type: grouped_light
+    alert:
+      action_values:
+      - breathe
+    dimming:
+      brightness: 8.7
+    color: {}
+    color_temperature: {}
+    color_temperature_delta: {}
+    dimming_delta: {}
+    dynamics: {}
+    'on':
+      'on': true
+    owner:
+      rid: '77121ee7-5a23-5a3a-81b9-4ec751f9a10c'
+      rtype: bridge_home
+    signaling:
+      signal_values:
+      - alternating
+      - no_signal
+      - on_off
+      - on_off_color
+  '63c1c58a-d2d3-565a-8ba5-ca9eb0342a92':
+    type: entertainment
+    equalizer: true
+    owner:
+      rid: d5d902e3-d906-5244-a6e0-1beaedff692a
+      rtype: device
+    proxy: true
+    renderer: true
+    renderer_reference:
+      rid: afd21f32-6bd4-529b-8a84-c7134ccd8fe4
+      rtype: light
+    segments:
+      configurable: false
+      max_segments: 1
+      segments:
+      - length: 1
+        start: 0
+  '7580e361-d874-55b9-8d35-a7e0cc7f008c':
+    type: zigbee_device_discovery
+    owner:
+      rid: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+      rtype: device
+    status: ready
+  '77121ee7-5a23-5a3a-81b9-4ec751f9a10c':
+    type: bridge_home
+    children:
+    - rid: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+      rtype: device
+    - rid: c71458be-36df-560e-933e-2c9ff8dd182f
+      rtype: room
+    services:
+    - rid: '50cc42fe-c199-551e-8899-ff348de4482a'
+      rtype: grouped_light
+  '77a2fb27-4f6d-55f5-ade5-ac5826bbd347':
+    type: zigbee_connectivity
+    mac_address: '0x0017880100000002'
+    owner:
+      rid: d5d902e3-d906-5244-a6e0-1beaedff692a
+      rtype: device
+    status: connected
+  '78d35de1-53db-59ee-9710-1d1aee1c8c10':
+    type: taurus_7455
+    capabilities:
+    - sensor
+    - collector
+    - sync
+    owner:
+      rid: d5d902e3-d906-5244-a6e0-1beaedff692a
+      rtype: device
+  '7905e8a9-de8e-59d0-b4cf-425a0e4139a6':
+    type: device
+    product_data:
+      model_id: BSB002
+      manufacturer_name: Signify Netherlands B.V.
+      product_name: Hue Bridge
+      product_archetype: bridge_v2
+      certified: true
+      software_version: '1.70.1970084010'
+    metadata:
+      name: Bifrost
+      archetype: bridge_v2
+    services:
+    - rid: '118ea023-5bdc-5adc-bb8a-e6095720392e'
+      rtype: bridge
+    - rid: '3602520b-d2f3-5725-aa13-48f62d1d4b7a'
+      rtype: entertainment
+    - rid: '7580e361-d874-55b9-8d35-a7e0cc7f008c'
+      rtype: zigbee_device_discovery
+    - rid: cb99447d-d2fb-5061-bb65-bfec9adf2a52
+      rtype: zigbee_connectivity
+    identify: {}
+  '825a6b78-f367-546d-93cc-543f4459776f':
+    type: scene
+    actions:
+    - action:
+        dimming:
+          brightness: 30.0
+        'on':
+          'on': true
+      target:
+        rid: afd21f32-6bd4-529b-8a84-c7134ccd8fe4
+        rtype: light
+    auto_dynamic: false
+    group:
+      rid: c71458be-36df-560e-933e-2c9ff8dd182f
+      rtype: room
+    metadata:
+      name: Evening
+    speed: 0.0
+    status: null
+    recall: {}
+  '89fcee4b-dffb-546d-93a4-b7e06400ece0':
+    type: grouped_light
+    alert: null
+    dimming: null
+    color: {}
+    color_temperature: {}
+    color_temperature_delta: {}
+    dimming_delta: {}
+    dynamics: {}
+    'on': null
+    owner:
+      rid: c71458be-36df-560e-933e-2c9ff8dd182f
+      rtype: room
+    signaling: null
+  a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa:
+    type: entertainment
+    equalizer: true
+    owner:
+      rid: cdab877c-e51a-5d69-a65f-4b810bfed550
+      rtype: device
+    proxy: true
+    renderer: true
+    renderer_reference:
+      rid: c649035c-0948-5211-a3e8-59e785037746
+      rtype: light
+    segments:
+      configurable: false
+      max_segments: 1
+      segments:
+      - length: 1
+        start: 0
+  afd21f32-6bd4-529b-8a84-c7134ccd8fe4:
+    type: light
+    owner:
+      rid: d5d902e3-d906-5244-a6e0-1beaedff692a
+      rtype: device
+    metadata:
+      name: Hall lamp
+      archetype: unknown_archetype
+      function: decorative
+    product_data:
+      function: decorative
+    alert:
+      action_values:
+      - breathe
+    color_temperature:
+      mirek: 400
+      mirek_schema:
+        mirek_minimum: 153
+        mirek_maximum: 500
+      mirek_valid: true
+    color_temperature_delta: {}
+    dimming:
+      brightness: 39.37007874015748
+      min_dim_level: 0.01
+    dimming_delta: {}
+    dynamics:
+      status: none
+      status_values:
+      - none
+      - dynamic_palette
+      speed: 0.0
+      speed_valid: false
+    effects:
+      status_values:
+      - no_effect
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      status: no_effect
+      effect_values:
+      - no_effect
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+    effects_v2:
+      action:
+        effect_values:
+        - no_effect
+        - candle
+        - fire
+        - prism
+        - sparkle
+        - opal
+        - glisten
+        - underwater
+        - cosmos
+        - sunbeam
+        - enchant
+      status:
+        effect: no_effect
+        effect_values:
+        - no_effect
+        - candle
+        - fire
+        - prism
+        - sparkle
+        - opal
+        - glisten
+        - underwater
+        - cosmos
+        - sunbeam
+        - enchant
+    service_id: 0
+    identify: {}
+    timed_effects:
+      status_values:
+      - no_effect
+      - sunrise
+      - sunset
+      status: no_effect
+      effect_values:
+      - no_effect
+      - sunrise
+      - sunset
+    mode: normal
+    'on':
+      'on': false
+    powerup:
+      preset: safety
+      configured: true
+      'on':
+        mode: 'on'
+        'on':
+          'on': true
+      dimming:
+        mode: dimming
+        dimming:
+          brightness: 100.0
+      color:
+        mode: color_temperature
+        color_temperature:
+          mirek: 366
+    signaling:
+      signal_values:
+      - no_signal
+      - on_off
+      - on_off_color
+      - alternating
+  c649035c-0948-5211-a3e8-59e785037746:
+    type: light
+    owner:
+      rid: cdab877c-e51a-5d69-a65f-4b810bfed550
+      rtype: device
+    metadata:
+      name: Kitchen ceiling
+      archetype: sultan_bulb
+      function: decorative
+    product_data:
+      function: decorative
+    alert:
+      action_values:
+      - breathe
+    color:
+      gamut:
+        red:
+          x: 0.6915
+          'y': 0.3083
+        green:
+          x: 0.17
+          'y': 0.7
+        blue:
+          x: 0.1532
+          'y': 0.0475
+      gamut_type: C
+      xy:
+        x: 0.31271
+        'y': 0.32902
+    color_temperature:
+      mirek: 300
+      mirek_schema:
+        mirek_minimum: 153
+        mirek_maximum: 500
+      mirek_valid: true
+    color_temperature_delta: {}
+    dimming:
+      brightness: 78.74015748031496
+      min_dim_level: 0.01
+    dimming_delta: {}
+    dynamics:
+      status: none
+      status_values:
+      - none
+      - dynamic_palette
+      speed: 0.0
+      speed_valid: false
+    effects:
+      status_values:
+      - no_effect
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      status: no_effect
+      effect_values:
+      - no_effect
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+    effects_v2:
+      action:
+        effect_values:
+        - no_effect
+        - candle
+        - fire
+        - prism
+        - sparkle
+        - opal
+        - glisten
+        - underwater
+        - cosmos
+        - sunbeam
+        - enchant
+      status:
+        effect: no_effect
+        effect_values:
+        - no_effect
+        - candle
+        - fire
+        - prism
+        - sparkle
+        - opal
+        - glisten
+        - underwater
+        - cosmos
+        - sunbeam
+        - enchant
+    service_id: 0
+    identify: {}
+    timed_effects:
+      status_values:
+      - no_effect
+      - sunrise
+      - sunset
+      status: no_effect
+      effect_values:
+      - no_effect
+      - sunrise
+      - sunset
+    mode: normal
+    'on':
+      'on': true
+    powerup:
+      preset: safety
+      configured: true
+      'on':
+        mode: 'on'
+        'on':
+          'on': true
+      dimming:
+        mode: dimming
+        dimming:
+          brightness: 100.0
+      color:
+        mode: color_temperature
+        color_temperature:
+          mirek: 366
+    signaling:
+      signal_values:
+      - no_signal
+      - on_off
+      - on_off_color
+      - alternating
+  c71458be-36df-560e-933e-2c9ff8dd182f:
+    type: room
+    children:
+    - rid: cdab877c-e51a-5d69-a65f-4b810bfed550
+      rtype: device
+    - rid: d5d902e3-d906-5244-a6e0-1beaedff692a
+      rtype: device
+    metadata:
+      name: Kitchen
+      archetype: home
+    services:
+    - rid: '89fcee4b-dffb-546d-93a4-b7e06400ece0'
+      rtype: grouped_light
+  cb99447d-d2fb-5061-bb65-bfec9adf2a52:
+    type: zigbee_connectivity
+    channel:
+      status: set
+      value: channel_25
+    mac_address: '11:22:33:44:55:66:77:88'
+    owner:
+      rid: '7905e8a9-de8e-59d0-b4cf-425a0e4139a6'
+      rtype: device
+    status: connected
+  cdab877c-e51a-5d69-a65f-4b810bfed550:
+    type: device
+    product_data:
+      model_id: LCT015
+      manufacturer_name: Signify Netherlands B.V.
+      product_name: LCT015
+      product_archetype: sultan_bulb
+      certified: true
+      software_version: '1.93.11'
+      hardware_platform_type: '100b-10c'
+    metadata:
+      name: Kitchen ceiling
+      archetype: sultan_bulb
+    services:
+    - rid: a92a6217-b93c-5d2e-97ae-0b2d3c8a59aa
+      rtype: entertainment
+    - rid: c649035c-0948-5211-a3e8-59e785037746
+      rtype: light
+    - rid: d6358aa0-8bcb-5b1a-bed9-917fba577b00
+      rtype: zigbee_connectivity
+    - rid: f142fedb-cf35-5962-a3d0-c72e5b7a4afa
+      rtype: taurus_7455
+    identify: {}
+  d5d902e3-d906-5244-a6e0-1beaedff692a:
+    type: device
+    product_data:
+      model_id: LTW010
+      manufacturer_name: Signify Netherlands B.V.
+      product_name: LTW010
+      product_archetype: unknown_archetype
+      certified: true
+      software_version: '1.93.11'
+    metadata:
+      name: Hall lamp
+      archetype: unknown_archetype
+    services:
+    - rid: '63c1c58a-d2d3-565a-8ba5-ca9eb0342a92'
+      rtype: entertainment
+    - rid: '77a2fb27-4f6d-55f5-ade5-ac5826bbd347'
+      rtype: zigbee_connectivity
+    - rid: '78d35de1-53db-59ee-9710-1d1aee1c8c10'
+      rtype: taurus_7455
+    - rid: afd21f32-6bd4-529b-8a84-c7134ccd8fe4
+      rtype: light
+    identify: {}
+  d6358aa0-8bcb-5b1a-bed9-917fba577b00:
+    type: zigbee_connectivity
+    mac_address: '0x0017880100000001'
+    owner:
+      rid: cdab877c-e51a-5d69-a65f-4b810bfed550
+      rtype: device
+    status: connected
+  f142fedb-cf35-5962-a3d0-c72e5b7a4afa:
+    type: taurus_7455
+    capabilities:
+    - sensor
+    - collector
+    - sync
+    owner:
+      rid: cdab877c-e51a-5d69-a65f-4b810bfed550
+      rtype: device

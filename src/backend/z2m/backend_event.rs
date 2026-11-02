@@ -19,10 +19,11 @@ use hue::stream::HueStreamLightsV2;
 use z2m::update::{DeviceEffect, DeviceUpdate};
 
 use crate::backend::z2m::Z2mBackend;
-use crate::backend::z2m::entertainment::EntStream;
+use crate::backend::z2m::entertainment::{AreaStream, EntStream};
 use crate::backend::z2m::websocket::Z2mWebSocket;
 use crate::error::ApiResult;
 use crate::model::state::AuxData;
+use crate::model::throttle::Throttle;
 
 impl Z2mBackend {
     #[allow(clippy::match_same_arms)]
@@ -366,7 +367,7 @@ impl Z2mBackend {
         z2mws: &mut Z2mWebSocket,
         ent_id: &Uuid,
     ) -> ApiResult<()> {
-        log::trace!("[{}] Entertainment start", self.name);
+        log::trace!("[{}] Entertainment start for area {ent_id}", self.name);
         let lock = self.state.lock().await;
 
         let ent: &EntertainmentConfiguration = lock.get_id(*ent_id)?;
@@ -380,18 +381,28 @@ impl Z2mBackend {
         log::trace!("[{}] Resolving entertainment channels", self.name);
         for chan in chans {
             for member in &chan.members {
-                let ent: &Entertainment = lock.get(&member.service)?;
-                let light_id = ent
-                    .renderer_reference
-                    .ok_or(HueError::NotFound(member.service.rid))?;
-                let topic = self
-                    .rmap
-                    .get(&light_id)
-                    .ok_or(HueError::NotFound(light_id.rid))?;
-                let dev = self
-                    .network
-                    .get(topic)
-                    .ok_or(HueError::NotFound(member.service.rid))?;
+                let Ok(ent) = lock.get::<Entertainment>(&member.service) else {
+                    continue;
+                };
+
+                // An area may name lights this server does not own. Ignoring
+                // them is what lets the server that does own them stream:
+                // failing here ends this backend's event loop, which is the
+                // outage this wave exists to remove.
+                let Some(light_id) = ent.renderer_reference else {
+                    continue;
+                };
+                let Some(topic) = self.rmap.get(&light_id) else {
+                    log::debug!(
+                        "[{}] Ignoring area {ent_id}: it does not own light {}",
+                        self.name,
+                        light_id.rid
+                    );
+                    continue;
+                };
+                let Some(dev) = self.network.get(topic) else {
+                    continue;
+                };
 
                 let segment_addr = dev.network_address + member.index;
 
@@ -407,20 +418,28 @@ impl Z2mBackend {
         drop(lock);
 
         if let Some(target) = targets.first() {
-            let mut es = EntStream::new(self.counter, target, addrs);
+            let counter = self.counters.get(ent_id).copied().unwrap_or_default();
+            let throttle = Throttle::from_fps(self.fps);
+            let mut es = EntStream::new(counter, target, addrs);
 
             // Not even a real Philips Hue bridge uses this trick!
             //
             // We set the entertainment mode fade speed ("smoothing")
             // to fit the target frame rate, to ensure perfectly smooth
             // transitionss, even at low frame rates!
-            es.stream.set_smoothing_duration(self.throttle.interval())?;
+            es.stream.set_smoothing_duration(throttle.interval())?;
 
             log::info!("Starting entertainment mode stream at {} fps", self.fps);
 
             es.start_stream(z2mws).await?;
 
-            self.entstream = Some(es);
+            self.entstreams
+                .insert(*ent_id, AreaStream::new(es, throttle));
+        } else {
+            log::debug!(
+                "[{}] Area {ent_id} has no lights this server owns; ignoring",
+                self.name
+            );
         }
 
         Ok(())
@@ -429,38 +448,59 @@ impl Z2mBackend {
     async fn backend_entertainment_frame(
         &mut self,
         z2mws: &mut Z2mWebSocket,
+        area: &Uuid,
         frame: &HueStreamLightsV2,
     ) -> ApiResult<()> {
-        if let Some(es) = &mut self.entstream {
-            if self.throttle.tick() {
-                es.frame(z2mws, frame).await?;
+        if let Some(es) = self.entstreams.get_mut(area) {
+            let forwarded = es.throttle.tick();
+
+            if let Some(streams) = &self.streams {
+                streams.frame_out(area, forwarded);
+            }
+
+            if forwarded {
+                es.stream.frame(z2mws, frame).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn backend_entertainment_stop(&mut self, z2mws: &mut Z2mWebSocket) -> ApiResult<()> {
-        log::debug!("Stopping entertainment mode..");
-        if let Some(es) = &mut self.entstream.take() {
+    async fn backend_entertainment_stop(
+        &mut self,
+        z2mws: &mut Z2mWebSocket,
+        area: &Uuid,
+    ) -> ApiResult<()> {
+        log::debug!(
+            "[{}] Stopping entertainment mode for area {area}",
+            self.name
+        );
+        if let Some(mut es) = self.entstreams.remove(area) {
+            es.stream.stop_stream(z2mws).await?;
+
+            self.counters.insert(*area, es.stream.counter());
+
             let mut lock = self.state.lock().await;
 
-            es.stop_stream(z2mws).await?;
+            // only this area's lights and status: the other area is still
+            // streaming and must not be touched
+            let Ok(ec) = lock.get_id::<EntertainmentConfiguration>(*area) else {
+                return Ok(());
+            };
+            let light_ids: Vec<Uuid> = ec.light_services.iter().map(|link| link.rid).collect();
+            let ec_streaming = ec.is_streaming();
 
-            self.counter = es.stream.counter();
-
-            for id in lock.get_resource_ids_by_type(RType::Light) {
-                let light: &Light = lock.get_id(id)?;
+            for id in light_ids {
+                let Ok(light) = lock.get_id::<Light>(id) else {
+                    continue;
+                };
                 if light.is_streaming() {
                     lock.update(&id, Light::stop_streaming)?;
                 }
             }
 
-            for id in lock.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
-                let ec: &EntertainmentConfiguration = lock.get_id(id)?;
-                if ec.is_streaming() {
-                    lock.update(&id, EntertainmentConfiguration::stop_streaming)?;
-                }
+            if ec_streaming {
+                lock.update(area, EntertainmentConfiguration::stop_streaming)?;
             }
             drop(lock);
         }
@@ -511,11 +551,13 @@ impl Z2mBackend {
                 self.backend_entertainment_start(z2mws, ent_id).await
             }
 
-            BackendRequest::EntertainmentFrame(frame) => {
-                self.backend_entertainment_frame(z2mws, frame).await
+            BackendRequest::EntertainmentFrame(area, frame) => {
+                self.backend_entertainment_frame(z2mws, area, frame).await
             }
 
-            BackendRequest::EntertainmentStop() => self.backend_entertainment_stop(z2mws).await,
+            BackendRequest::EntertainmentStop(area) => {
+                self.backend_entertainment_stop(z2mws, area).await
+            }
 
             BackendRequest::ZigbeeDeviceDiscovery(rlink, zbd) => {
                 self.backend_zigbee_device_discovery(z2mws, rlink, zbd)

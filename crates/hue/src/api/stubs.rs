@@ -57,6 +57,14 @@ pub struct DollarRef {
     pub dref: Option<String>,
 }
 
+/// A contact sensor's resource, whose payload the bridge does not model.
+///
+/// Transparent over the JSON it carries: the wire shape is the value itself,
+/// which is what an unmapped Hue resource is.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct Contact(pub Value);
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DevicePower {
     pub owner: ResourceLink,

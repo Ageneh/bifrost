@@ -14,6 +14,7 @@ use openssl::ssl::{Ssl, SslContext, SslMethod};
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_openssl::SslStream;
 use udp_stream::{UdpListenBuilder, UdpListener, UdpStream};
@@ -28,29 +29,62 @@ use hue::stream::{
 };
 use svc::traits::Service;
 
+use crate::config_store::ConfigStore;
 use crate::error::{ApiError, ApiResult};
 use crate::resource::Resources;
 use crate::routes::auth::STANDARD_CLIENT_KEY;
+use crate::server::streams::StreamRegistry;
 
 pub struct EntertainmentService {
     addr: SocketAddr,
     udp: Option<Arc<UdpListener>>,
-    ctx: Option<SslContext>,
+    ctx: Option<Arc<SslContext>>,
     res: Arc<Mutex<Resources>>,
+    streams: Arc<StreamRegistry>,
+    /// Read on every accept, so a changed `bifrost.entertainment.max_streams`
+    /// applies without restarting the listener.
+    store: Arc<ConfigStore>,
 }
 
 impl EntertainmentService {
-    pub fn new(addr: Ipv4Addr, port: u16, res: Arc<Mutex<Resources>>) -> ApiResult<Self> {
+    pub fn new(
+        addr: Ipv4Addr,
+        port: u16,
+        res: Arc<Mutex<Resources>>,
+        streams: Arc<StreamRegistry>,
+        store: Arc<ConfigStore>,
+    ) -> ApiResult<Self> {
         let res = Self {
             addr: SocketAddr::new(addr.into(), port),
             udp: None,
             ctx: None,
             res,
+            streams,
+            store,
         };
 
         Ok(res)
     }
 
+    /// How many sessions may stream at once.
+    fn max_streams(&self) -> usize {
+        usize::try_from(self.store.active().bifrost.entertainment.max_streams)
+            .unwrap_or(1)
+            .max(1)
+    }
+}
+
+/// One DTLS session: everything a stream needs, and nothing that outlives it.
+///
+/// A session runs on its own task, so a sender that panics, stalls or
+/// disappears takes nothing else with it.
+#[derive(Clone)]
+pub struct Session {
+    res: Arc<Mutex<Resources>>,
+    streams: Arc<StreamRegistry>,
+}
+
+impl Session {
     async fn read_frame(sess: &mut SslStream<UdpStream>, buf: &mut [u8]) -> ApiResult<usize> {
         const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -74,6 +108,73 @@ impl EntertainmentService {
         }
     }
 
+    /// Which area a v1 frame belongs to.
+    ///
+    /// A v1 client names lights, not an area, so the area has to be inferred.
+    /// "Best intersection" is ambiguous as soon as two zones share a light, so
+    /// the rule is deterministic: an area that is already streaming wins,
+    /// otherwise the area claiming strictly more of the frame's lights wins,
+    /// and a tie is refused rather than guessed. The refusal is what keeps a
+    /// second TV from being served colours meant for the first.
+    #[allow(clippy::result_large_err)]
+    pub fn select_area(res: &Resources, light_ids: &BTreeSet<Uuid>) -> ApiResult<Uuid> {
+        let mut candidates = vec![];
+
+        for uuid in res.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
+            let entconf = res.get_id::<EntertainmentConfiguration>(uuid)?;
+
+            let ent_light_ids: BTreeSet<Uuid> =
+                entconf.light_services.iter().map(|ls| ls.rid).collect();
+
+            let included = light_ids.intersection(&ent_light_ids).count();
+            if included == 0 {
+                // an area with none of the frame's lights cannot render it
+                continue;
+            }
+
+            candidates.push((uuid, included, entconf.is_streaming()));
+        }
+
+        let active: Vec<_> = candidates
+            .iter()
+            .filter(|(_, _, streaming)| *streaming)
+            .map(|(uuid, _, _)| *uuid)
+            .collect();
+
+        match active.as_slice() {
+            [only] => return Ok(*only),
+            [] => {}
+            several => return Err(ApiError::EntStreamAmbiguous(Self::area_names(res, several))),
+        }
+
+        let most = candidates.iter().map(|(_, included, _)| *included).max();
+
+        let best: Vec<_> = candidates
+            .iter()
+            .filter(|(_, included, _)| Some(*included) == most)
+            .map(|(uuid, _, _)| *uuid)
+            .collect();
+
+        match best.as_slice() {
+            [only] => Ok(*only),
+            [] => Err(ApiError::EntStreamInitError),
+            several => Err(ApiError::EntStreamAmbiguous(Self::area_names(res, several))),
+        }
+    }
+
+    /// The names of `areas`, sorted, for a refusal a person has to act on.
+    fn area_names(res: &Resources, areas: &[Uuid]) -> String {
+        let mut names: Vec<String> = areas
+            .iter()
+            .map(|uuid| {
+                res.get_id::<EntertainmentConfiguration>(*uuid)
+                    .map_or_else(|_| uuid.to_string(), |ec| ec.metadata.name.clone())
+            })
+            .collect();
+        names.sort();
+        names.join(", ")
+    }
+
     #[allow(clippy::unused_async, unreachable_code, unused_variables)]
     pub fn translate_v1_frame(
         res: &Resources,
@@ -86,32 +187,9 @@ impl EntertainmentService {
         }
         let light_ids: BTreeSet<_> = lights.values().copied().collect();
 
-        let mut best_included = 0;
-        let mut best_excluded = 0;
-        let mut best_area = None;
+        let area = Self::select_area(res, &light_ids)?;
 
-        for uuid in res.get_resource_ids_by_type(RType::EntertainmentConfiguration) {
-            let entconf = res.get_id::<EntertainmentConfiguration>(uuid)?;
-
-            let ent_light_ids: BTreeSet<Uuid> =
-                entconf.light_services.iter().map(|ls| ls.rid).collect();
-
-            let included = light_ids.intersection(&ent_light_ids).count();
-            let excluded = light_ids.difference(&ent_light_ids).count();
-
-            if (included > best_included)
-                || ((included == best_included) && (excluded < best_excluded))
-            {
-                log::trace!("Found candidate entertainment_configuration: {uuid}");
-                log::trace!("  lights included: {included}");
-                log::trace!("  lights excluded: {excluded}");
-                best_included = included;
-                best_excluded = excluded;
-                best_area = Some(uuid);
-            }
-        }
-
-        if let Some(area) = best_area {
+        {
             let mut mapping = BTreeMap::new();
             for (id_v1, id) in &lights {
                 let light: &Light = res.get_id(*id)?;
@@ -179,8 +257,6 @@ impl EntertainmentService {
             };
 
             Ok(HueStreamPacketV2 { area, lights })
-        } else {
-            Err(ApiError::EntStreamInitError)
         }
     }
 
@@ -191,7 +267,8 @@ impl EntertainmentService {
         }
     }
 
-    pub async fn run_loop(&self, mut sess: SslStream<UdpStream>) -> ApiResult<()> {
+    /// Accept the DTLS handshake, then stream until the sender stops.
+    pub async fn run(&self, mut sess: SslStream<UdpStream>) -> ApiResult<()> {
         let mut buf = [0u8; 1024];
 
         timeout(Duration::from_secs(5), Pin::new(&mut sess).accept())
@@ -201,7 +278,7 @@ impl EntertainmentService {
         // read the first frame, and use it to look up area, color mode, etc.
         // this means we discard the first frame, but since we expect at least
         // 10 frames *per second*, this is acceptable.
-        let mut sz = Self::read_frame(&mut sess, &mut buf).await?;
+        let sz = Self::read_frame(&mut sess, &mut buf).await?;
         log::trace!("First entertainment frame: {}", hex::encode(&buf[..sz]));
         let raw = HueStreamPacket::parse(&buf[..sz])?;
 
@@ -217,10 +294,53 @@ impl EntertainmentService {
 
         drop(lock);
 
+        let area = header.area;
+        log::info!("Entertainment stream started for area {area}");
+        self.streams.open(area);
+
+        let result = self.pump(&mut sess, &mut buf, sz, &header).await;
+
+        // the area is the only thing that names what to stop, and it is known
+        // from here on, so the stop is sent whatever ended the loop
+        if let Err(err) = self
+            .res
+            .lock()
+            .await
+            .backend_request(BackendRequest::EntertainmentStop(area))
+        {
+            log::warn!("Could not announce the end of stream {area}: {err}");
+        }
+
+        match &result {
+            Ok(()) => self.streams.close(&area),
+            // a stream that ended badly stays listed, with its reason, so the
+            // diagnostics screen can say why the TV's picture went dark
+            Err(err) => self.streams.set_error(&area, &err.to_string()),
+        }
+
+        result
+    }
+
+    /// Forward every frame of one session until the sender stops.
+    async fn pump(
+        &self,
+        sess: &mut SslStream<UdpStream>,
+        buf: &mut [u8],
+        mut sz: usize,
+        header: &HueStreamPacketV2,
+    ) -> ApiResult<()> {
         let mut fps = 0;
         let mut period = Utc::now().timestamp();
 
         loop {
+            // a stop from the admin screen ends the session here, on its
+            // next frame, rather than leaving the sender streaming into a
+            // backend that has already forgotten it
+            if self.streams.stop_requested(&header.area) {
+                log::info!("Stopping entertainment stream for area {}", header.area);
+                break;
+            }
+
             let view = &buf[..sz];
             log::trace!("Packet buffer: {}", view.escape_ascii());
 
@@ -239,16 +359,24 @@ impl EntertainmentService {
 
             let ts = Utc::now().timestamp();
             if period != ts {
-                log::info!("Incoming entertainment fps: {fps}");
+                log::debug!("Incoming entertainment fps: {fps}");
                 period = ts;
                 fps = 0;
             }
 
             fps += 1;
-            let req = BackendRequest::EntertainmentFrame(pkt.lights);
+            self.streams.frame_in(&pkt.area);
+            let req = BackendRequest::EntertainmentFrame(pkt.area, pkt.lights);
             self.res.lock().await.backend_request(req)?;
 
-            sz = Self::read_frame(&mut sess, &mut buf).await?;
+            // the stop has to reach a sender that went quiet as well, so the
+            // wait for the next frame races the stop request
+            let next = tokio::select! {
+                read = Self::read_frame(sess, buf) => read?,
+                () = self.streams.wait_for_stop(&header.area) => break,
+            };
+
+            sz = next;
             if sz == 0 {
                 break;
             }
@@ -274,7 +402,7 @@ impl Service for EntertainmentService {
             Ok(16)
         });
 
-        self.ctx = Some(bldr.build());
+        self.ctx = Some(Arc::new(bldr.build()));
         Ok(())
     }
 
@@ -297,22 +425,62 @@ impl Service for EntertainmentService {
             return Err(ApiError::service_error("Udp not initialized"));
         };
 
-        let Some(ctx) = self.ctx.as_ref() else {
+        let Some(ctx) = self.ctx.clone() else {
             return Err(ApiError::service_error("Ctx not initialized"));
         };
 
+        let session = Session {
+            res: self.res.clone(),
+            streams: self.streams.clone(),
+        };
+
+        // one task per session, reaped here: a sender that panics ends its
+        // own task and the listener keeps accepting
+        let mut sessions = JoinSet::new();
+
         loop {
-            let (socket, _addr) = udp.accept().await?;
-            let ssl = Ssl::new(ctx)?;
-            let stream = SslStream::new(ssl, socket)?;
+            tokio::select! {
+                accepted = udp.accept() => {
+                    let (socket, addr) = accepted?;
 
-            match self.run_loop(stream).await {
-                Ok(()) => log::info!("Entertainment stream finished"),
-                Err(err) => log::error!("Entertainment stream error: {err}"),
+                    let limit = self.max_streams();
+                    if sessions.len() >= limit {
+                        log::warn!(
+                            "Refusing an entertainment stream from {addr}: {limit} already running"
+                        );
+                        // dropping the socket leaves the sender without a
+                        // handshake, which is how a busy bridge answers
+                        drop(socket);
+                        continue;
+                    }
+
+                    let ssl = Ssl::new(&ctx)?;
+                    let stream = SslStream::new(ssl, socket)?;
+                    let session = session.clone();
+
+                    sessions.spawn(async move {
+                        let result = session.run(stream).await;
+                        (addr, result)
+                    });
+                }
+
+                Some(finished) = sessions.join_next(), if !sessions.is_empty() => {
+                    match finished {
+                        Ok((addr, Ok(()))) => {
+                            log::info!("Entertainment stream from {addr} finished");
+                        }
+                        Ok((addr, Err(err))) => {
+                            log::error!("Entertainment stream from {addr} error: {err}");
+                        }
+                        Err(err) if err.is_panic() => {
+                            log::error!("Entertainment stream panicked; still listening");
+                        }
+                        Err(err) => {
+                            log::error!("Entertainment stream task failed: {err}");
+                        }
+                    }
+                }
             }
-
-            let req = BackendRequest::EntertainmentStop();
-            self.res.lock().await.backend_request(req)?;
         }
     }
 

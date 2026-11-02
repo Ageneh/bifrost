@@ -1,0 +1,30 @@
+{
+  "20": {
+    "appdata": {
+      "data": "xxxxx_r18",
+      "version": 1
+    },
+    "group": "18",
+    "lastupdated": "<time>",
+    "lights": [
+      "14",
+      "9"
+    ],
+    "lightstates": {
+      "14": {
+        "bri": 127,
+        "on": true
+      },
+      "9": {
+        "on": false
+      }
+    },
+    "locked": false,
+    "name": "Regress",
+    "owner": "01010101-0202-0303-0404-050505050505",
+    "picture": "",
+    "recycle": false,
+    "type": "GroupScene",
+    "version": 2
+  }
+}

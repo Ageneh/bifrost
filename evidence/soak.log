@@ -1,0 +1,117 @@
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:19:7
+   |
+19 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:63:7
+   |
+63 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:91:7
+   |
+91 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+   --> crates/z2m/src/convert.rs:116:7
+    |
+116 |     #[must_use]
+    |       ^^^^^^^^
+    |
+    = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+   --> crates/z2m/src/convert.rs:135:7
+    |
+135 |     #[must_use]
+    |       ^^^^^^^^
+    |
+    = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: `z2m` (lib) generated 5 warnings (run `cargo fix --lib -p z2m` to apply 5 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+warning: the following packages contain code that will be rejected by a future version of Rust: num-bigint-dig v0.8.4
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/soak.rs (target/debug/deps/soak-8e946b36f746f227)
+
+running 1 test
+rows after the first frames: 4
+test four_streams_for_half_an_hour has been running for over 60 seconds
+t=  90s rss=23104 KiB lock=1.625µs rows=4 frames=14739 drops=9680 errors=[]
+t= 120s rss=23136 KiB lock=792ns rows=4 frames=19797 drops=13021 errors=[]
+t= 150s rss=23136 KiB lock=1.167µs rows=4 frames=24842 drops=16341 errors=[]
+t= 180s rss=23136 KiB lock=1.166µs rows=4 frames=29740 drops=19557 errors=[]
+t= 210s rss=23136 KiB lock=1.209µs rows=4 frames=34649 drops=22783 errors=[]
+t= 240s rss=23136 KiB lock=1.5µs rows=4 frames=39683 drops=26089 errors=[]
+t= 270s rss=23136 KiB lock=542ns rows=4 frames=44737 drops=29414 errors=[]
+t= 300s rss=23136 KiB lock=1.375µs rows=4 frames=49522 drops=32556 errors=[]
+t= 330s rss=23136 KiB lock=500ns rows=4 frames=54550 drops=35857 errors=[]
+t= 360s rss=23136 KiB lock=500ns rows=4 frames=59512 drops=39099 errors=[]
+t= 390s rss=23136 KiB lock=375ns rows=4 frames=64675 drops=42513 errors=[]
+t= 420s rss=23136 KiB lock=1.625µs rows=4 frames=69667 drops=45805 errors=[]
+t= 450s rss=23136 KiB lock=1.041µs rows=4 frames=74776 drops=49176 errors=[]
+t= 480s rss=23136 KiB lock=1.083µs rows=4 frames=79773 drops=52470 errors=[]
+t= 510s rss=23136 KiB lock=417ns rows=4 frames=84812 drops=55786 errors=[]
+t= 540s rss=23136 KiB lock=875ns rows=4 frames=89595 drops=58927 errors=[]
+t= 570s rss=23152 KiB lock=1µs rows=4 frames=94412 drops=62088 errors=[]
+t= 600s rss=23152 KiB lock=1µs rows=4 frames=99348 drops=65338 errors=[]
+t= 630s rss=23200 KiB lock=1.375µs rows=4 frames=104337 drops=68624 errors=[]
+t= 660s rss=23200 KiB lock=1.167µs rows=4 frames=109287 drops=71881 errors=[]
+t= 690s rss=23200 KiB lock=1.042µs rows=4 frames=114112 drops=75053 errors=[]
+t= 720s rss=23200 KiB lock=1.042µs rows=4 frames=118913 drops=78189 errors=[]
+t= 750s rss=23200 KiB lock=500ns rows=4 frames=123926 drops=81488 errors=[]
+t= 780s rss=23200 KiB lock=458ns rows=4 frames=128889 drops=84745 errors=[]
+t= 810s rss=23200 KiB lock=1.208µs rows=4 frames=133783 drops=87961 errors=[]
+t= 840s rss=23200 KiB lock=958ns rows=4 frames=138573 drops=91099 errors=[]
+t= 870s rss=23200 KiB lock=1.75µs rows=4 frames=143518 drops=94348 errors=[]
+t= 900s rss=23200 KiB lock=1.583µs rows=4 frames=148377 drops=97542 errors=[]
+t= 930s rss=23200 KiB lock=1.666µs rows=4 frames=153322 drops=100788 errors=[]
+t= 960s rss=23200 KiB lock=2.042µs rows=4 frames=158231 drops=104021 errors=[]
+t= 990s rss=23200 KiB lock=2.084µs rows=4 frames=163152 drops=107264 errors=[]
+t=1020s rss=23200 KiB lock=1.917µs rows=4 frames=168195 drops=110583 errors=[]
+t=1050s rss=23200 KiB lock=1.375µs rows=4 frames=173121 drops=113823 errors=[]
+t=1080s rss=23200 KiB lock=1.334µs rows=4 frames=177964 drops=116996 errors=[]
+t=1110s rss=23200 KiB lock=1.708µs rows=4 frames=182754 drops=120152 errors=[]
+t=1140s rss=23200 KiB lock=1.875µs rows=4 frames=187645 drops=123356 errors=[]
+t=1170s rss=23200 KiB lock=1.833µs rows=4 frames=192513 drops=126547 errors=[]
+t=1200s rss=23200 KiB lock=2.666µs rows=4 frames=197460 drops=129794 errors=[]
+t=1230s rss=23200 KiB lock=1.916µs rows=4 frames=202338 drops=132996 errors=[]
+t=1260s rss=23200 KiB lock=1.834µs rows=4 frames=207156 drops=136155 errors=[]
+t=1290s rss=23200 KiB lock=1.542µs rows=4 frames=212174 drops=139458 errors=[]
+t=1320s rss=23200 KiB lock=1.042µs rows=4 frames=217152 drops=142744 errors=[]
+t=1350s rss=23200 KiB lock=2.292µs rows=4 frames=221925 drops=145869 errors=[]
+t=1380s rss=23200 KiB lock=2.125µs rows=4 frames=226835 drops=149086 errors=[]
+t=1410s rss=23200 KiB lock=1.375µs rows=4 frames=231718 drops=152297 errors=[]
+t=1440s rss=23200 KiB lock=1µs rows=4 frames=236591 drops=155488 errors=[]
+t=1470s rss=23200 KiB lock=750ns rows=4 frames=241418 drops=158662 errors=[]
+t=1500s rss=23200 KiB lock=1.458µs rows=4 frames=246318 drops=161869 errors=[]
+t=1530s rss=23200 KiB lock=542ns rows=4 frames=251366 drops=165192 errors=[]
+t=1560s rss=23200 KiB lock=709ns rows=4 frames=256324 drops=168453 errors=[]
+t=1590s rss=23200 KiB lock=1.167µs rows=4 frames=261165 drops=171627 errors=[]
+t=1620s rss=23200 KiB lock=1.75µs rows=4 frames=265957 drops=174769 errors=[]
+t=1650s rss=23200 KiB lock=292ns rows=4 frames=270797 drops=177940 errors=[]
+t=1680s rss=23200 KiB lock=1.458µs rows=4 frames=275721 drops=181175 errors=[]
+t=1710s rss=23200 KiB lock=1.375µs rows=4 frames=280677 drops=184437 errors=[]
+t=1740s rss=23200 KiB lock=917ns rows=4 frames=285530 drops=187624 errors=[]
+t=1770s rss=23200 KiB lock=1.417µs rows=4 frames=290316 drops=190765 errors=[]
+soak: baseline=23104 KiB last=23200 KiB growth=0.4% worst_lock=2.666µs first_drop_ratio=0.657 last_drop_ratio=0.657
+test four_streams_for_half_an_hour ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1800.27s
+

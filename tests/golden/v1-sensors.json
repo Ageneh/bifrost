@@ -1,0 +1,19 @@
+{
+  "1": {
+    "config": {
+      "configured": false,
+      "on": true,
+      "sunriseoffset": 30,
+      "sunsetoffset": -30
+    },
+    "manufacturername": "Signify Netherlands B.V.",
+    "modelid": "PHDL00",
+    "name": "Daylight",
+    "state": {
+      "daylight": null,
+      "lastupdated": "none"
+    },
+    "swversion": "1.0",
+    "type": "Daylight"
+  }
+}

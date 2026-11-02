@@ -2,12 +2,14 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "feat/**", "fix/**", "fm/**" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "feat/**" ]
 
 env:
   CARGO_TERM_COLOR: always
+  # clippy-baseline.txt is measured on this toolchain; lint sets move between releases
+  RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
   build:
@@ -17,14 +19,102 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Syntax check
-      run: cargo check --all-targets --workspace
+    - name: Install toolchain
+      run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy,rustfmt
+        rustup default "$RUST_TOOLCHAIN"
 
-    - name: Lint check
-      run: cargo clippy --all-targets --workspace
+    - name: Syntax check
+      run: cargo check --all-targets --workspace --locked
+
+    - name: Lint check against clippy-baseline.txt
+      run: scripts/clippy-gate.sh
 
     - name: Run tests
-      run: cargo test --workspace
+      run: cargo test --workspace --locked
 
     - name: Run format check
       run: cargo fmt --check --all
+
+  gates:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install toolchain
+      run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+        rustup default "$RUST_TOOLCHAIN"
+
+    - name: Cache the pinned master build
+      uses: actions/cache@v4
+      with:
+        path: target/regress/master-12d9e37
+        key: regress-master-12d9e37-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}
+
+    - name: Hue regression against the master goldens (G5)
+      run: scripts/regress.sh
+
+    - name: Upgrade from a master install (G6)
+      run: scripts/upgrade.sh
+
+    - name: Web UI behind a path-prefix proxy
+      run: scripts/ui-prefix.sh
+
+    - name: Documented endpoints and settings (G12)
+      run: scripts/doc-check.sh
+
+  playwright:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 10
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+        cache-dependency-path: frontend/pnpm-lock.yaml
+
+    - name: Install toolchain
+      run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+        rustup default "$RUST_TOOLCHAIN"
+
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+    - name: Cache the Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: playwright-${{ env.RUST_TOOLCHAIN }}
+
+    - name: Install the frontend dependencies
+      run: pnpm --dir frontend install --frozen-lockfile
+
+    - name: Install the browser
+      run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+    # The suite runs against the release binary built here, not a dev
+    # server: scripts/e2e-release.sh builds the bundle, embeds it, boots the
+    # binary, and release.spec.ts hashes what it serves.
+    - name: Playwright against the release binary
+      run: scripts/e2e-release.sh
+
+  docker:
+
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build the image and boot it with docker-compose.yaml (G11)
+      run: scripts/docker-boot.sh

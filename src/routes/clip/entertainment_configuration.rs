@@ -18,7 +18,11 @@ use crate::routes::auth::STANDARD_APPLICATION_ID;
 use crate::routes::clip::{ApiV2Result, V2Reply};
 use crate::server::appstate::AppState;
 
-// FIXME: These are hard-coded values fitting for an LCX005 gradient light chain
+/// The v1 layout: fixed values fitting for an LCX005 gradient light chain.
+///
+/// The v1 `/api` path has no way to say where a light sits, so it cycles this
+/// list. A v2 zone is laid out by the editor instead; see [`auto_layout`] for
+/// the default it starts from.
 pub const POSITIONS: &[Position] = &[
     Position {
         x: -0.4,
@@ -114,6 +118,54 @@ pub async fn post_resource(state: &AppState, req: Value) -> ApiV2Result {
     V2Reply::ok(rlink)
 }
 
+/// The layout a zone starts from when the editor supplies no positions.
+///
+/// `segments` points spread evenly along the top edge of a screen, left to
+/// right, so a two-light TV and a seven-segment gradient chain both start
+/// somewhere sensible instead of on top of each other. The result depends on
+/// nothing but `segments`, which is what lets the editor show the same
+/// default the server would compute before anything is saved.
+#[must_use]
+#[allow(clippy::cast_precision_loss, clippy::suboptimal_flops)]
+pub fn auto_layout(segments: usize) -> Vec<Position> {
+    /// The horizontal half-width of a screen, in the Hue coordinate system.
+    const EDGE: f64 = 0.4;
+    /// The top edge of a screen.
+    const TOP: f64 = 0.8;
+    /// Just in front of the screen's surface.
+    const DEPTH: f64 = 0.4;
+
+    /// Three decimals is what the Hue app shows and what round-trips exactly.
+    fn round(value: f64) -> f64 {
+        (value * 1000.0).round() / 1000.0
+    }
+
+    match segments {
+        0 => vec![],
+        1 => vec![Position::new(round(0.0), TOP, DEPTH)],
+        count => {
+            let step = (2.0 * EDGE) / (count - 1) as f64;
+            (0..count)
+                .map(|index| Position::new(round(-EDGE + step * index as f64), TOP, DEPTH))
+                .collect()
+        }
+    }
+}
+
+/// How many channels one service location contributes: one per segment, or
+/// one for a light that cannot address segments.
+fn segment_count(ent: &Entertainment) -> usize {
+    ent.segments
+        .as_ref()
+        .map_or(1, |segments| segments.segments.len().max(1))
+}
+
+/// Build the channel list from the positions the editor supplied.
+///
+/// A channel sits where its segment was placed. A location that names fewer
+/// positions than it has segments falls back to [`auto_layout`] for the rest,
+/// rather than collapsing the segments onto one point: a gradient chain whose
+/// seven segments all sat in the same place would render one colour.
 fn make_channels(
     lock: &Resources,
     locations: &[EntertainmentConfigurationServiceLocations],
@@ -122,30 +174,24 @@ fn make_channels(
 
     let mut channel_id = 0;
     for location in locations {
-        let Some(pos) = location.positions.first() else {
-            continue;
-        };
         let ent: &Entertainment = lock.get(&location.service)?;
+        let count = segment_count(ent);
+        let fallback = auto_layout(count);
 
-        if let Some(segs) = &ent.segments {
-            for index in 0..segs.segments.len() {
-                channels.push(EntertainmentConfigurationChannels {
-                    channel_id,
-                    position: POSITIONS[index % POSITIONS.len()].clone(),
-                    members: vec![EntertainmentConfigurationStreamMembers {
-                        service: location.service,
-                        index: u16::try_from(index)?,
-                    }],
-                });
-                channel_id += 1;
-            }
-        } else {
+        for index in 0..count {
+            let position = location
+                .positions
+                .get(index)
+                .or_else(|| fallback.get(index))
+                .cloned()
+                .unwrap_or_default();
+
             channels.push(EntertainmentConfigurationChannels {
                 channel_id,
-                position: pos.clone(),
+                position,
                 members: vec![EntertainmentConfigurationStreamMembers {
                     service: location.service,
-                    index: 0,
+                    index: u16::try_from(index)?,
                 }],
             });
             channel_id += 1;
@@ -213,14 +259,19 @@ pub async fn put_resource_id(state: &AppState, rlink: ResourceLink, put: Value) 
 
     if let Some(action) = &upd.action {
         let ent: &EntertainmentConfiguration = lock.get(&rlink)?;
+        // every light in the zone, not the first one: an area is what the
+        // owner pointed at, and a zone with no lights yet simply has none
+        // to move
         let svc = ent.light_services.clone();
 
-        lock.update::<Light>(&svc[0].rid, |light| {
-            light.mode = match action {
-                EntertainmentConfigurationAction::Start => LightMode::Streaming,
-                EntertainmentConfigurationAction::Stop => LightMode::Normal,
-            }
-        })?;
+        for link in svc {
+            lock.update::<Light>(&link.rid, |light| {
+                light.mode = match action {
+                    EntertainmentConfigurationAction::Start => LightMode::Streaming,
+                    EntertainmentConfigurationAction::Stop => LightMode::Normal,
+                }
+            })?;
+        }
     }
 
     let bridge_ent = find_bridge_entertainment(&lock)?;

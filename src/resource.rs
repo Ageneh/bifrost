@@ -31,12 +31,22 @@ pub struct Resources {
     version: SwVersion,
     state_updates: Arc<Notify>,
     backend_updates: Sender<Arc<BackendRequest>>,
+    /// Entertainment frames on their own channel.
+    ///
+    /// A frame is worth nothing once a newer one exists, so a consumer that
+    /// falls behind may drop the ones it missed. Sharing the control channel
+    /// meant one slow backend took the channel down for every other consumer,
+    /// and a lagged receiver ended that backend's event loop.
+    backend_frames: Sender<Arc<BackendRequest>>,
     hue_event_stream: HueEventStream,
 }
 
 impl Resources {
     const MAX_SCENE_ID: u32 = 100;
     const HUE_EVENTS_BUFFER_SIZE: usize = 128;
+    const BACKEND_EVENT_CAPACITY: usize = 32;
+    /// Roughly a quarter second of frames at the 120 fps a Sync box sends.
+    const FRAME_CAPACITY: usize = 32;
 
     #[allow(clippy::new_without_default)]
     #[must_use]
@@ -45,7 +55,8 @@ impl Resources {
             state,
             version,
             state_updates: Arc::new(Notify::new()),
-            backend_updates: Sender::new(32),
+            backend_updates: Sender::new(Self::BACKEND_EVENT_CAPACITY),
+            backend_frames: Sender::new(Self::FRAME_CAPACITY),
             hue_event_stream: HueEventStream::new(Self::HUE_EVENTS_BUFFER_SIZE),
         }
     }
@@ -54,6 +65,14 @@ impl Resources {
         self.version = version;
         self.state.patch_bridge_version(&self.version);
         self.state_updates.notify_one();
+    }
+
+    /// Advertise `max_streams` on the bridge's entertainment resource; see
+    /// [`State::patch_max_streams`].
+    pub fn patch_max_streams(&mut self, max_streams: u32) -> ApiResult<()> {
+        self.state.patch_max_streams(max_streams)?;
+        self.state_updates.notify_one();
+        Ok(())
     }
 
     pub fn reset_all_streaming(&mut self) -> ApiResult<()> {
@@ -91,6 +110,19 @@ impl Resources {
 
     pub fn init(&mut self, bridge_id: &str) -> ApiResult<()> {
         self.add_bridge(bridge_id.to_owned())
+    }
+
+    /// Throw the whole state away and start from a bridge with nothing on
+    /// it: every scene and every imported resource is gone.
+    ///
+    /// The version is kept, since it describes the firmware, not the state.
+    #[allow(clippy::result_large_err)]
+    pub fn reset(&mut self, bridge_id: &str) -> ApiResult<()> {
+        self.state = State::new();
+        self.init(bridge_id)?;
+        self.reset_all_streaming()?;
+        self.state_updates.notify_one();
+        Ok(())
     }
 
     pub fn aux_get(&self, link: &ResourceLink) -> ApiResult<&AuxData> {
@@ -268,6 +300,42 @@ impl Resources {
 
         self.hue_event_stream.hue_event(evt);
 
+        Ok(())
+    }
+
+    /// The bridge id the state's bridge resource carries, if it has one.
+    #[must_use]
+    pub fn bridge_id(&self) -> Option<String> {
+        self.get_resources_by_type(RType::Bridge)
+            .into_iter()
+            .find_map(|rr| match rr.obj {
+                Resource::Bridge(bridge) => Some(bridge.bridge_id),
+                _ => None,
+            })
+    }
+
+    /// Rebuild the bridge resources for `bridge_id`, keeping everything else.
+    ///
+    /// The bridge id is the MAC address, so changing the MAC makes every
+    /// resource derived from the old one stale: the bridge, its home, and the
+    /// services hanging off them. They are removed and added again under the
+    /// new id; rooms, scenes and imported devices are untouched.
+    #[allow(clippy::result_large_err)]
+    pub fn adopt_bridge_id(&mut self, bridge_id: &str) -> ApiResult<()> {
+        let Some(old) = self.bridge_id() else {
+            return self.init(bridge_id);
+        };
+        if old == bridge_id {
+            return Ok(());
+        }
+
+        for link in bridge_links(&old) {
+            // a state written by an older version may not hold every one
+            let _ = self.delete(&link);
+        }
+
+        self.init(bridge_id)?;
+        self.state_updates.notify_one();
         Ok(())
     }
 
@@ -589,13 +657,49 @@ impl Resources {
         self.backend_updates.subscribe()
     }
 
+    /// The entertainment frames, on the channel that may drop them.
+    #[must_use]
+    pub fn frame_stream(&self) -> Receiver<Arc<BackendRequest>> {
+        self.backend_frames.subscribe()
+    }
+
     pub fn backend_request(&self, req: BackendRequest) -> ApiResult<()> {
-        if !matches!(req, BackendRequest::EntertainmentFrame(_)) {
+        let frame = matches!(req, BackendRequest::EntertainmentFrame(..));
+        if !frame {
             log::debug!("Backend request: {req:#?}");
         }
 
-        self.backend_updates.send(Arc::new(req))?;
+        let req = Arc::new(req);
+
+        // a frame nobody reads is a frame nobody wanted: no backend is
+        // running for the area yet, and the stream is not an error
+        if frame {
+            self.backend_frames.send(req).ok();
+            return Ok(());
+        }
+
+        self.backend_updates.send(req)?;
 
         Ok(())
     }
+}
+
+/// Every resource [`Resources::add_bridge`] creates for `bridge_id`.
+///
+/// The list is the one `add_bridge` builds, in the same order, so a bridge
+/// identity can be removed and rebuilt without touching anything else.
+fn bridge_links(bridge_id: &str) -> Vec<ResourceLink> {
+    let link_bridge = RType::Bridge.deterministic(bridge_id);
+    let link_bridge_home = RType::BridgeHome.deterministic(format!("{bridge_id}HOME"));
+
+    vec![
+        link_bridge,
+        link_bridge_home,
+        RType::Device.deterministic(link_bridge.rid),
+        RType::Device.deterministic(link_bridge_home.rid),
+        RType::Entertainment.deterministic(link_bridge.rid),
+        RType::ZigbeeDeviceDiscovery.deterministic(link_bridge.rid),
+        RType::ZigbeeConnectivity.deterministic(link_bridge.rid),
+        RType::GroupedLight.deterministic(link_bridge_home.rid),
+    ]
 }

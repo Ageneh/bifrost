@@ -1,0 +1,56 @@
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:19:7
+   |
+19 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:63:7
+   |
+63 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+  --> crates/z2m/src/convert.rs:91:7
+   |
+91 |     #[must_use]
+   |       ^^^^^^^^
+   |
+   = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+   --> crates/z2m/src/convert.rs:116:7
+    |
+116 |     #[must_use]
+    |       ^^^^^^^^
+    |
+    = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: the `must_use` attribute cannot be used on trait methods in impl blocks
+   --> crates/z2m/src/convert.rs:135:7
+    |
+135 |     #[must_use]
+    |       ^^^^^^^^
+    |
+    = help: the `must_use` attribute can be applied to data types, foreign functions, functions, inherent methods, provided trait methods, required trait methods, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+
+warning: `z2m` (lib) generated 5 warnings (run `cargo fix --lib -p z2m` to apply 5 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+warning: the following packages contain code that will be rejected by a future version of Rust: num-bigint-dig v0.8.4
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/soak.rs (target/debug/deps/soak-8e946b36f746f227)
+
+running 1 test
+rows after the first frames: 4
+test four_streams_for_half_an_hour has been running for over 60 seconds
+t=  90s rss=23104 KiB lock=1.625µs rows=4 frames=14739 drops=9680 errors=[]
